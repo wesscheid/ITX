@@ -1,0 +1,5 @@
+{
+  "name": "InstaTranscribe",
+  "description": "Download and transcribe Instagram videos via URL, or upload any video file to extract audio and translate it using Gemini 2.5 Flash.",
+  "requestFramePermissions": []
+}
