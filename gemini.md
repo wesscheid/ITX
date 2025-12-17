@@ -1,78 +1,76 @@
 # InstaTranscribe Project Context
 
 ## 1. Project Overview
-InstaTranscribe is a client-side React application that downloads Instagram videos (Reels, Posts, Stories), extracts the audio in-memory, and uses Google Gemini to transcribe and translate the content. It solves the specific challenge of "locking-in" translation capabilities for social media content without requiring server-side storage.
+InstaTranscribe is a **Full-Stack** React application that downloads Instagram videos (Reels, Posts, Stories), extracts the audio, and uses Google Gemini to transcribe and translate the content. 
+
+Originally a client-side only app, it has evolved into a hybrid architecture to reliably bypass Instagram's anti-scraping measures using a dedicated backend.
 
 ## 2. Tech Stack & Environment
-- **Framework:** React 19 (via ESM Imports, no build step required).
-- **Styling:** Tailwind CSS (via CDN) with Dark Mode support.
+- **Frontend:** React 19 (Vite), TypeScript, Tailwind CSS v3.
+- **Backend:** Node.js, Express.js.
+- **Video Processing:** `yt-dlp` (Binary executable managed by the backend).
 - **AI Model:** Google Gemini 2.5 Flash (`gemini-2.5-flash`) via `@google/genai` SDK.
-- **Runtime:** Browser-native ES Modules (no Webpack/Vite bundler configuration in source).
-- **Environment Variables:** `process.env.API_KEY` is injected by the runner.
+- **Deployment:** Render (Web Service running both Frontend static files and Backend API).
 
 ## 3. Architecture & Data Flow
 
-### A. The In-Memory Pipeline
-To ensure privacy and speed, the app avoids saving files to the user's device unless necessary.
+### A. The Hybrid Pipeline
 1.  **Input:** User provides an Instagram URL.
-2.  **Sanitization:** URL query parameters (tracking ids) are stripped.
-3.  **Resolution:** The app resolves the "display URL" to a "direct media URL" (CDN link) using a Dual-Resolver Strategy (see Section 4).
-4.  **Fetching:** The app fetches the binary data (Blob) using CORS proxies.
-5.  **AI Processing:** The Blob is converted to Base64 and sent directly to Gemini with a prompt to transcribe and translate.
+2.  **Request:** Frontend sends URL to Backend (`/api/instagram`).
+3.  **Resolution (Backend):** 
+    *   Backend executes `yt-dlp` to resolve the video URL and metadata.
+    *   `yt-dlp` handles cookies, signatures, and anti-bot measures.
+4.  **Download (Backend):**
+    *   Backend streams the video data from Instagram's CDN.
+    *   Pipes the stream to the Frontend response (avoiding CORS).
+5.  **Processing (Frontend):** 
+    *   Frontend receives the video `Blob`.
+    *   Converts `Blob` to `Base64`.
+    *   Sends to Google Gemini API for transcription/translation.
 6.  **Output:** JSON response containing `originalText` and `translatedText`.
 
 ### B. Gemini Integration (`services/geminiService.ts`)
--   **Model:** `gemini-2.5-flash` (Optimized for speed/multimodal).
+-   **Model:** `gemini-2.5-flash`.
 -   **Input:** Multimodal (Text Prompt + Inline Media Data).
 -   **Output:** Strict JSON Schema (`application/json`).
-    -   `originalText`: Verbatim transcription.
-    -   `translatedText`: Translation into target language.
 
-## 4. Video Resolution Strategy (`services/videoDownloaderService.ts`)
-This is the most complex part of the application due to Instagram's aggressive anti-scraping and CORS policies.
+## 4. Video Resolution Strategy (`server/server.js`)
+The "Cobalt" and "Proxy" strategies have been replaced by a robust local backend.
 
-### Primary: Cobalt API
--   **Endpoint:** `api.cobalt.tools`
--   **Logic:**
-    1.  Clean URL.
-    2.  Try **Direct Connection** (Audio Mode).
-    3.  Try **Direct Connection** (Video Mode fallback).
-    4.  Try **Proxy Connection** (If blocked by geo/IP).
-    5.  Handles `HTTP 400` errors gracefully by attempting fallbacks.
+### Local Backend Strategy
+-   **Endpoint:** `/api/instagram` (Proxied to `localhost:10000` in dev).
+-   **Tool:** `yt-dlp` (Industry standard video downloader).
+-   **Mechanism:**
+    1.  Checks if `yt-dlp` binary exists (downloads it on build if missing).
+    2.  Runs `yt-dlp --get-url` to find the direct video link.
+    3.  Proxies the download to the client to bypass CORS.
 
-### Secondary: Alternative API (MilanCodes)
--   **Trigger:** Executed immediately if Cobalt fails.
--   **Logic:**
-    -   Rotates through multiple Vercel instances (`tau`, `five`, main).
-    -   Rotates through multiple paths (`/download`, `/api/download`, `/`).
-    -   Validates responses to ensure they are JSON and not 404 HTML pages.
+## 5. Deployment (Render)
+The application is deployed as a single "Web Service" on Render.
+-   **Build Command:** `npm run render-build`
+    -   Installs Frontend Deps (`npm install`).
+    -   Builds Frontend (`vite build`).
+    -   Installs Backend Deps (`cd server && npm install`).
+    -   Downloads `yt-dlp` binary (`./download-ytdlp.sh`).
+-   **Start Command:** `npm start`
+    -   Runs `node server/server.js`.
+    -   Server hosts API at `/api`.
+    -   Server hosts Frontend static files at `/`.
 
-### Tertiary: CORS Proxies
-Once a direct media URL is found (e.g., `cdn.instagram.com/...`), it cannot be fetched directly by the browser due to CORS. We route the download through:
-1.  `corsproxy.io` (Primary)
-2.  `api.allorigins.win` (Secondary)
-3.  `thingproxy.freeboard.io` (Tertiary)
-
-## 5. Error Handling & UX
-The `App.tsx` handles specific error strings thrown by the service layer:
--   **`MANUAL_DOWNLOAD_REQUIRED|{url}`**: The resolvers found a link, but the browser/proxies could not download the binary data (likely due to strict CORS or AdBlockers). The UI presents a button for the user to download the file manually.
--   **`RESOLVER_CONNECTION_ERROR`**: Both Cobalt and Alternative APIs failed. The UI suggests using a third-party tool (SnapInsta, SaveIG).
-
-## 6. Coding Standards & Rules
-1.  **Imports:** Use `importmap` in `index.html`. Do not add npm packages that require bundling.
-2.  **State Management:** Keep it simple with React `useState`.
-3.  **Components:** Functional components with TypeScript interfaces.
-4.  **Accessibility:** Use semantic HTML and ARIA labels where appropriate.
-5.  **Type Safety:** Strict TypeScript interfaces for all API responses and Props.
+## 6. Key Features
+-   **Instagram Downloader:** Reliable downloading via `yt-dlp` backend.
+-   **AI Transcription:** Fast, multimodal transcription using Gemini Flash 2.5.
+-   **Share/Keep Integration:** "Share" button using `navigator.share` API for mobile integration with Google Keep/Notes.
+-   **Dark Mode:** System-preference aware Tailwind dark mode.
 
 ## 7. File Structure
--   `index.html`: Entry point, importmap, Tailwind setup.
 -   `App.tsx`: Main logic controller.
+-   `server/`:
+    -   `server.js`: Express backend handling API and Static files.
+    -   `bin/`: Contains `yt-dlp` binary.
 -   `services/`:
-    -   `videoDownloaderService.ts`: Resolution and fetching logic.
+    -   `videoDownloaderService.ts`: Fetches from local/deployed backend.
     -   `geminiService.ts`: AI interaction logic.
 -   `components/`:
-    -   `UrlInput.tsx`: Form for URL entry.
-    -   `FileUpload.tsx`: Drag-and-drop zone.
-    -   `ResultCard.tsx`: Displays translation and download options.
-    -   `ProcessingState.tsx`: Loading spinners and status text.
+    -   `UrlInput.tsx`, `ResultCard.tsx`, etc.
+-   `gemini.md`: Project Context.
