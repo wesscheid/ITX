@@ -66,7 +66,9 @@ const App: React.FC = () => {
     setStatus(AppStatus.DOWNLOADING);
 
     try {
-      const file = await fetchVideoFromUrl(url, (status) => console.log(status));
+      const blob = await fetchVideoFromUrl(url, (status) => console.log(status));
+      // Convert Blob to File to satisfy TypeScript and downstream logic
+      const file = new File([blob], "downloaded_video.mp4", { type: blob.type || 'video/mp4' });
       await processFile(file);
     } catch (error: any) {
       console.error(error);
