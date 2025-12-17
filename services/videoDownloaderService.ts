@@ -1,95 +1,100 @@
-// Service to handle fetching video data from a URL
-// Note: Client-side fetching of Instagram videos is heavily restricted by CORS.
-// We use a public API (Cobalt) to bridge this.
+import { AppStatus } from '../types';
 
-// List of CORS proxies to try in order
-const PROXIES = [
-  // Primary: corsproxy.io (Standard)
-  (url: string) => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-  // Secondary: AllOrigins (Raw endpoint)
-  (url: string) => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-  // Tertiary: ThingProxy
-  (url: string) => `https://thingproxy.freeboard.io/fetch/${url}`
-];
+const LOCAL_API_BASE = '';
 
-export const fetchVideoFromUrl = async (url: string): Promise<File> => {
-  let downloadUrl: string | null = null;
+/**
+ * Custom Error class for downloader issues
+ */
+export class DownloaderError extends Error {
+  constructor(message: string, public code: string = 'UNKNOWN_ERROR') {
+    super(message);
+    this.name = 'DownloaderError';
+  }
+}
+
+/**
+ * Validates if the URL is a valid Instagram URL
+ */
+export const isValidInstagramUrl = (url: string): boolean => {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname.includes('instagram.com') && 
+           (parsed.pathname.includes('/reel/') || 
+            parsed.pathname.includes('/p/') || 
+            parsed.pathname.includes('/tv/') ||
+            parsed.pathname.includes('/stories/'));
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Main entry point: Resolves URL and downloads the video as a Blob.
+ * Now uses the local 'InstantSaver' backend running on port 3001.
+ */
+export const fetchVideoFromUrl = async (
+  url: string, 
+  onStatusUpdate: (status: string) => void
+): Promise<Blob> => {
+  
+  // 1. Validate
+  if (!isValidInstagramUrl(url)) {
+    throw new DownloaderError('Invalid Instagram URL', 'INVALID_URL');
+  }
 
   try {
-    // 1. Resolve the URL using Cobalt API
-    // We try to get audio only to save bandwidth and reduce failure rates
-    const response = await fetch('https://api.cobalt.tools/api/json', {
-      method: 'POST',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        url: url,
-        isAudioOnly: true
-      })
-    });
-
-    if (!response.ok) {
-      throw new Error(`Cobalt API unavailable (${response.status})`);
+    onStatusUpdate('Connecting to local downloader service...');
+    
+    // 2. Get Metadata / Resolution from Local Backend
+    const cleanUrl = url.split('?')[0]; // Simple strip
+    const apiUrl = `${LOCAL_API_BASE}/api/instagram?url=${encodeURIComponent(cleanUrl)}`;
+    
+    const metaResponse = await fetch(apiUrl);
+    
+    if (!metaResponse.ok) {
+       // If local server isn't running
+       if (metaResponse.status === 404 || metaResponse.status === 500) {
+           throw new DownloaderError('Local downloader service error. Is the server running?', 'SERVER_ERROR');
+       }
+       throw new DownloaderError('Failed to resolve video.', 'RESOLVE_ERROR');
     }
 
-    const data = await response.json();
+    const metaData = await metaResponse.json();
 
-    if (data.status === 'error') {
-      throw new Error(data.text || 'Could not find media at this URL.');
+    if (!metaData.download_url) {
+        throw new DownloaderError('No download URL returned from service.', 'NO_MEDIA_FOUND');
     }
 
-    downloadUrl = data.url;
-
-    // Handle "picker" case
-    if (!downloadUrl && data.picker && data.picker.length > 0) {
-      downloadUrl = data.picker[0].url;
+    // 3. Download the actual video file via the backend (Proxied Stream)
+    // This avoids CORS because we are fetching from localhost to localhost
+    onStatusUpdate('Downloading video data...');
+    const downloadEndpoint = `${LOCAL_API_BASE}${metaData.download_url}`;
+    
+    const videoResponse = await fetch(downloadEndpoint);
+    
+    if (!videoResponse.ok) {
+        throw new DownloaderError('Failed to download video data.', 'DOWNLOAD_ERROR');
     }
 
-    if (!downloadUrl) {
-      throw new Error('No valid media URL found in the response.');
+    const videoBlob = await videoResponse.blob();
+    
+    if (videoBlob.size < 1000) {
+        throw new DownloaderError('Downloaded file is too small (likely invalid).', 'INVALID_FILE');
     }
+
+    return videoBlob;
 
   } catch (error: any) {
-    console.error("Cobalt API Error:", error);
-    // If the resolver fails, we can't even get the download URL.
-    // We throw a specific code so the UI knows to suggest external tools.
-    if (error.message === 'Failed to fetch' || error.name === 'TypeError') {
-      throw new Error("RESOLVER_CONNECTION_ERROR");
+    console.error('Video Download Error:', error);
+    
+    if (error.message.includes('Failed to fetch')) {
+        throw new DownloaderError('Could not connect to backend. Please run "node server/server.js" in a separate terminal.', 'CONNECTION_REFUSED');
     }
-    throw error;
-  }
-
-  // 2. Try to download the content using multiple proxies
-  for (const proxyGen of PROXIES) {
-    try {
-      const proxyUrl = proxyGen(downloadUrl);
-      console.log(`Trying proxy: ${proxyUrl}`);
-      
-      const mediaResponse = await fetch(proxyUrl);
-      
-      if (!mediaResponse.ok) {
-        console.warn(`Proxy failed: ${mediaResponse.status}`);
-        continue;
-      }
-
-      const blob = await mediaResponse.blob();
-      
-      // Check if we actually got an error page masquerading as a blob
-      if (blob.type.includes('text/html') || blob.size < 1000) {
-         console.warn("Proxy returned invalid content type");
-         continue;
-      }
-      
-      return new File([blob], "extracted_audio.mp3", { type: 'audio/mp3' });
-
-    } catch (e) {
-      console.warn("Proxy attempt failed:", e);
+    
+    if (error instanceof DownloaderError) {
+      throw error;
     }
+    
+    throw new DownloaderError(error.message || 'Unknown error occurred', 'UNKNOWN_ERROR');
   }
-
-  // 3. If all proxies fail, throw an error with the direct link for manual handling
-  // We use a pipe delimiter to make it easy to parse in the UI
-  throw new Error(`MANUAL_DOWNLOAD_REQUIRED|${downloadUrl}`);
 };

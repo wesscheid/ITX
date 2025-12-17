@@ -66,7 +66,7 @@ const App: React.FC = () => {
     setStatus(AppStatus.DOWNLOADING);
 
     try {
-      const file = await fetchVideoFromUrl(url);
+      const file = await fetchVideoFromUrl(url, (status) => console.log(status));
       await processFile(file);
     } catch (error: any) {
       console.error(error);

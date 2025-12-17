@@ -1,0 +1,33 @@
+export enum AppStatus {
+  IDLE = 'IDLE',
+  DOWNLOADING = 'DOWNLOADING',
+  PROCESSING = 'PROCESSING',
+  SUCCESS = 'SUCCESS',
+  ERROR = 'ERROR'
+}
+
+export interface ProcessingResult {
+  originalText: string;
+  translatedText: string;
+  language: string;
+}
+
+export interface LanguageOption {
+  code: string;
+  name: string;
+}
+
+export const SUPPORTED_LANGUAGES: LanguageOption[] = [
+  { code: 'en', name: 'English' },
+  { code: 'es', name: 'Spanish' },
+  { code: 'fr', name: 'French' },
+  { code: 'de', name: 'German' },
+  { code: 'it', name: 'Italian' },
+  { code: 'pt', name: 'Portuguese' },
+  { code: 'zh', name: 'Chinese (Simplified)' },
+  { code: 'ja', name: 'Japanese' },
+  { code: 'ko', name: 'Korean' },
+  { code: 'ru', name: 'Russian' },
+  { code: 'ar', name: 'Arabic' },
+  { code: 'hi', name: 'Hindi' },
+];

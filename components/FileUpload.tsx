@@ -25,10 +25,11 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      if (file.type.startsWith('video/')) {
+      // Accept video OR audio files (since manual download might give .mp3)
+      if (file.type.startsWith('video/') || file.type.startsWith('audio/')) {
         onFileSelect(file);
       } else {
-        alert("Please upload a valid video file.");
+        alert("Please upload a valid video or audio file.");
       }
     }
   }, [disabled, onFileSelect]);
@@ -55,7 +56,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
     >
       <input
         type="file"
-        accept="video/*"
+        accept="video/*,audio/*"
         onChange={handleFileInput}
         disabled={disabled}
         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer disabled:cursor-not-allowed"
@@ -69,10 +70,10 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
         </div>
         <div>
           <p className="text-lg font-medium text-slate-700 dark:text-slate-200">
-            {isDragging ? 'Drop video here' : 'Click or drag video to upload'}
+            {isDragging ? 'Drop file here' : 'Click or drag file to upload'}
           </p>
           <p className="text-sm text-slate-400 dark:text-slate-500 mt-1">
-            Supports MP4, MOV, WEBM (Max 50MB)
+            Supports MP4, MOV, MP3, WAV (Max 50MB)
           </p>
         </div>
       </div>
