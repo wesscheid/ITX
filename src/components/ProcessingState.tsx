@@ -12,7 +12,7 @@ const ProcessingState: React.FC<ProcessingStateProps> = ({ status }) => {
     <div className="w-full py-12 flex flex-col items-center justify-center space-y-4 animate-in fade-in duration-500">
       <div className="relative w-16 h-16">
         <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-200 dark:border-slate-700 rounded-full"></div>
-        <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-600 dark:border-purple-500 rounded-full border-t-transparent animate-spin"></div>
+        <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-600 dark:border-purple-500 rounded-full border-t-transparent dark:border-t-transparent animate-spin"></div>
       </div>
       <div className="text-center">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
