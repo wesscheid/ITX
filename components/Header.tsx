@@ -24,10 +24,8 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
         )}
       </button>
 
-      <div className="inline-flex items-center justify-center p-3 mb-4 bg-gradient-to-br from-purple-600 to-pink-500 rounded-2xl shadow-lg">
-        <svg xmlns="http://www.w3.org/2000/svg" className="h-8 w-8 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
-        </svg>
+      <div className="inline-flex items-center justify-center mb-4">
+        <img src="/itx_logo.png" alt="InstaTranscribe Logo" className="h-16 w-auto" />
       </div>
       <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600 mb-2">
         InstaTranscribe
