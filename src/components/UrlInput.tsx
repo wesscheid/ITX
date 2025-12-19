@@ -26,7 +26,7 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
             type="url"
             id="insta-url"
             required
-            placeholder="https://www.instagram.com/reel/..."
+            placeholder="Paste Instagram video link to get transcription"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             disabled={disabled}
@@ -35,7 +35,7 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
           <button
             type="submit"
             disabled={disabled || !url}
-            className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2"
+            className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 flex-shrink-0"
           >
             <span>Process</span>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -44,7 +44,7 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Works with public Instagram Reels and Posts. If this fails, use the "Upload File" tab.
+          Paste a link from Instagram and get a transcription. If automatic download fails, you can upload the file.
         </p>
       </form>
     </div>
