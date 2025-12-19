@@ -36,12 +36,6 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
           Translation Complete
         </h2>
         <div className="flex flex-wrap gap-2 justify-center">
-          <button
-            onClick={onReset}
-            className="text-sm px-3 py-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-colors"
-          >
-            New Upload
-          </button>
           
           <button
             onClick={handleCopyToNotes}
@@ -100,6 +94,19 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
             {result.translatedText}
           </div>
         </div>
+      </div>
+
+      {/* Footer Action */}
+      <div className="bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700 p-4 flex justify-center">
+        <button
+          onClick={onReset}
+          className="w-full sm:w-auto px-6 py-2.5 bg-white dark:bg-slate-700 border border-slate-300 dark:border-slate-600 text-slate-700 dark:text-slate-200 font-medium rounded-lg hover:bg-slate-50 dark:hover:bg-slate-600 hover:text-purple-600 dark:hover:text-purple-400 transition-all shadow-sm flex items-center justify-center gap-2"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+          </svg>
+          Transcribe Another Video
+        </button>
       </div>
     </div>
   );
