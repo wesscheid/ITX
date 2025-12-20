@@ -64,6 +64,79 @@ function safeFileName(base, ext) {
   return `${s}_${Date.now()}${ext}`;
 }
 
+// ---------- Cookies Helper ----------
+function getCookiesPath() {
+  let rawCookies = null;
+  const secretPath = "/etc/secrets/cookies.txt";
+
+  // 1. Get Raw Content
+  if (fs.existsSync(secretPath)) {
+    console.log("✅ Found Vercel Secret File");
+    try {
+      rawCookies = fs.readFileSync(secretPath, 'utf8');
+    } catch (e) {
+      console.error("Error reading secret file:", e);
+    }
+  } 
+  
+  if (!rawCookies && process.env.IG_COOKIES) {
+    console.log("✅ Using IG_COOKIES env var");
+    rawCookies = process.env.IG_COOKIES;
+  }
+
+  if (!rawCookies) return null;
+
+  try {
+    // 2. Process & Clean
+    const lines = rawCookies.split('\n');
+    const cleanedLines = [];
+    
+    lines.forEach(line => {
+      // Remove potential copy-paste prefixes like "1 " or "│ 1 "
+      let l = line.replace(/^[│|]?\s*\d+\s+/, '').replace(/[│|]\s*$/, '').trim();
+      if (!l) return;
+
+      // Check if this is a start of a new cookie line or comment
+      // Valid starts: "# ", "#HttpOnly_", ".instagram.com", "instagram.com"
+      const isStart = l.startsWith('#') || l.startsWith('.'); 
+      
+      if (isStart || cleanedLines.length === 0) {
+        cleanedLines.push(l);
+      } else {
+        // Likely a wrapped line (continuation of previous value)
+        // Append to last line
+        cleanedLines[cleanedLines.length - 1] += l;
+      }
+    });
+
+    // 3. Fix Separators (Spaces -> Tabs)
+    const finalLines = cleanedLines.map(l => {
+      if (l.startsWith('# ')) return l; // Comment
+      
+      // If no tabs, try to fix space separation
+      if (!l.includes('\t')) {
+         const parts = l.split(/\s+/);
+         // A valid line should have at least 7 parts (last part is value)
+         if (parts.length >= 7) {
+             // Reconstruct: first 6 with tabs, rest joined (value)
+             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join('');
+         }
+      }
+      return l;
+    });
+
+    const cleanCookies = finalLines.join('\n');
+    const tempPath = path.join("/tmp", "cookies.txt");
+    fs.writeFileSync(tempPath, cleanCookies);
+    console.log("✅ Wrote cleaned cookies to", tempPath);
+    return tempPath;
+
+  } catch (e) {
+    console.error("Failed to process cookies:", e);
+    return null;
+  }
+}
+
 // ======================================================
 //  INSTAGRAM
 // ======================================================
@@ -87,8 +160,10 @@ app.get("/api/instagram", (req, res) => {
   }
 
   const cleanUrl = url.trim();
+  const cookiePath = getCookiesPath();
+  const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
-  const cmd = `"${YTDLP_PATH}" --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
     /"/g,
     '\\"'
   )}"`;
@@ -111,7 +186,7 @@ app.get("/api/instagram", (req, res) => {
       }
 
       // Fallback metadata
-      const metaCmd = `"${YTDLP_PATH}" -J "${cleanUrl.replace(/"/g, '\\"')}"`;
+      const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
       exec(metaCmd, { maxBuffer: 20 * 1024 * 1024 }, (mErr, mOut) => {
         if (mErr) {
           const errorMsg = stderr || mErr.message;
@@ -164,7 +239,10 @@ app.get("/api/instagram/download", (req, res) => {
   );
   res.setHeader("Content-Type", "video/mp4");
 
+  const cookiePath = getCookiesPath();
   const args = [
+    "--user-agent",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "-f",
     "best[height<=720][ext=mp4]/best[ext=mp4]/best",
     "--merge-output-format",
@@ -177,6 +255,10 @@ app.get("/api/instagram/download", (req, res) => {
     "-",
     url
   ];
+
+  if (cookiePath) {
+    args.unshift("--cookies", cookiePath);
+  }
 
   const child = spawn(YTDLP_PATH, args);
   child.stdout.pipe(res);
@@ -356,11 +438,15 @@ app.get("/api/youtube/download", (req, res) => {
 const distPath = path.join(__dirname, "../dist");
 app.use(express.static(distPath));
 
-app.get("*", (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
-  console.log(`🔗 Health: http://localhost:${PORT}/health`);
-});
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
+    console.log(`🔗 Health: http://localhost:${PORT}/health`);
+  });
+}
+
+module.exports = app;
