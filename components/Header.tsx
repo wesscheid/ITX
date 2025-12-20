@@ -31,7 +31,7 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
         InstaTranscribe
       </h1>
       <p className="text-slate-600 dark:text-slate-400 max-w-lg mx-auto">
-        Upload your downloaded Instagram Reels, Stories, or any video. We'll transcribe the audio and translate it to your language instantly.
+        Paste an Instagram link or upload a video file. We’ll transcribe the audio and translate it to your language in seconds.
       </p>
     </header>
   );
