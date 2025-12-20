@@ -35,7 +35,7 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
           <button
             type="submit"
             disabled={disabled || !url}
-            className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 flex-shrink-0"
+            className="bg-purple-600 hover:bg-purple-700 disabled:bg-slate-400 text-white px-6 py-2 rounded-lg font-medium transition-colors flex items-center gap-2 flex-shrink-0 self-center sm:self-auto"
           >
             <span>Process</span>
             <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
