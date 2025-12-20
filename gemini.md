@@ -74,3 +74,9 @@ The application is deployed as a single "Web Service" on Render.
 -   `components/`:
     -   `UrlInput.tsx`, `ResultCard.tsx`, etc.
 -   `gemini.md`: Project Context.
+
+## 8. Development Configuration
+- **Git User:** `wesscheid <34629619+wesscheid@users.noreply.github.com>`
+- **Deployment:** 
+    - **Render:** Branch `render` (or `main` configured for Render).
+    - **Vercel:** Branch `vercel`.
