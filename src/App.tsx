@@ -226,7 +226,7 @@ const App: React.FC = () => {
         </div>
         
         <footer className="text-center text-slate-400 dark:text-slate-500 text-sm">
-          <p>Powered by Gemini 2.5 Flash Multimodal API</p>
+          <p>Powered by Gemini</p>
         </footer>
       </div>
     </div>
