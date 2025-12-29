@@ -52,7 +52,7 @@ const App: React.FC = () => {
     } catch (error) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg("An error occurred while processing the video with Gemini.");
+      setErrorMsg((error as Error).message || "An error occurred while processing the video with Gemini.");
     }
   };
 
