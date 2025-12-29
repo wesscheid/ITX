@@ -9,6 +9,10 @@ const os = require("os");
 const app = express();
 const PORT = process.env.PORT || 10000;
 
+// Simple in-memory cache for metadata
+const metadataCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
+
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
@@ -231,6 +235,14 @@ app.get("/api/instagram", (req, res) => {
   }
 
   const cleanUrl = url.trim();
+
+  // Check cache
+  const cached = metadataCache.get(cleanUrl);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log('Serving from cache for', cleanUrl);
+    return res.json(cached.data);
+  }
+
   const cookiePath = getCookiesPath();
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
@@ -244,7 +256,7 @@ app.get("/api/instagram", (req, res) => {
     { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
     (err, stdout, stderr) => {
       if (!err && stdout.trim()) {
-        return res.json({
+        const data = {
           type: "video",
           can_preview: true,
           preview_url: stdout.trim(),
@@ -253,7 +265,10 @@ app.get("/api/instagram", (req, res) => {
           )}`,
           username: "instagram",
           title: "Instagram media"
-        });
+        };
+        // Cache the result
+        metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
+        return res.json(data);
       }
 
       // Fallback metadata
@@ -268,7 +283,7 @@ app.get("/api/instagram", (req, res) => {
         }
         try {
           const data = JSON.parse(mOut);
-          res.json({
+          const responseData = {
             type: "video",
             can_preview: false,
             preview_url: data.thumbnail || null,
@@ -277,7 +292,10 @@ app.get("/api/instagram", (req, res) => {
             )}`,
             username: data.uploader || "instagram",
             title: data.title || "Instagram media"
-          });
+          };
+          // Cache the result
+          metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
+          res.json(responseData);
         } catch {
           res.status(500).json({ error: "Instagram parse failed" });
         }

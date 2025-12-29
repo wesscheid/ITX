@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 
 interface UrlInputProps {
   onUrlSubmit: (url: string) => void;
@@ -51,4 +51,4 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
   );
 };
 
-export default UrlInput;
+export default memo(UrlInput);

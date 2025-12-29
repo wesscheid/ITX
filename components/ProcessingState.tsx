@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { AppStatus } from '../types';
 
 interface ProcessingStateProps {
@@ -31,4 +31,4 @@ const ProcessingState: React.FC<ProcessingStateProps> = ({ status }) => {
   );
 };
 
-export default ProcessingState;
+export default memo(ProcessingState);
