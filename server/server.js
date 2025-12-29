@@ -4,6 +4,7 @@ const cors = require("cors");
 const { exec, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
@@ -87,6 +88,33 @@ function getCookiesPath() {
   if (!rawCookies) return null;
 
   try {
+    // If the provided cookies look like a JSON export (e.g. browser export),
+    // convert them to Netscape format lines so yt-dlp accepts them.
+    const maybe = rawCookies.trim();
+    if (maybe.startsWith('{') || maybe.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(maybe);
+        if (Array.isArray(parsed)) {
+          const jsonLines = parsed.map((c) => {
+            const domain = c.domain || c.host || '';
+            const httpOnly = !!c.httpOnly;
+            const prefix = httpOnly ? '#HttpOnly_' : '';
+            const outDomain = domain.startsWith('.') ? domain : `.${domain}`;
+            const flag = 'TRUE';
+            const pathv = c.path || '/';
+            const secure = c.secure ? 'TRUE' : 'FALSE';
+            const expires = c.expirationDate ? Math.floor(Number(c.expirationDate)) : 0;
+            const name = c.name || '';
+            const value = c.value || '';
+            return `${prefix}${outDomain}\t${flag}\t${pathv}\t${secure}\t${expires}\t${name}\t${value}`;
+          });
+          rawCookies = jsonLines.join('\n');
+        }
+      } catch (jsonErr) {
+        // Ignore JSON parse errors and fall back to existing cleaning logic
+      }
+    }
+
     // 2. Process & Clean
     const lines = rawCookies.split('\n');
     const cleanedLines = [];
@@ -111,24 +139,67 @@ function getCookiesPath() {
 
     // 3. Fix Separators (Spaces -> Tabs)
     const finalLines = cleanedLines.map(l => {
-      if (l.startsWith('# ')) return l; // Comment
-      
+      // Preserve human comments that start with "# " exactly
+      if (l.startsWith('# ')) return l;
+
       // If no tabs, try to fix space separation
       if (!l.includes('\t')) {
          const parts = l.split(/\s+/);
          // A valid line should have at least 7 parts (last part is value)
          if (parts.length >= 7) {
              // Reconstruct: first 6 with tabs, rest joined (value)
-             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join('');
+             // Use a space between value parts to avoid concatenation errors
+             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join(' ');
          }
       }
       return l;
     });
 
-    const cleanCookies = finalLines.join('\n');
-    const tempPath = path.join("/tmp", "cookies.txt");
+    // Prepend the Netscape cookie file header and ensure trailing newline
+    const header = '# Netscape HTTP Cookie File';
+    const cleanCookies = header + '\n' + finalLines.join('\n') + '\n';
+    const tempPath = path.join(os.tmpdir(), "cookies.txt");
     fs.writeFileSync(tempPath, cleanCookies);
+    // Log a masked preview for debugging (don't leak full secrets)
+    const previewLines = cleanCookies
+      .split('\n')
+      .slice(0, 10)
+      .map(l => l.replace(/(sessionid\t)[^\t]+/, '$1[REDACTED]'))
+      .join('\n');
     console.log("✅ Wrote cleaned cookies to", tempPath);
+    console.log("COOKIE_BYTES:", Buffer.byteLength(cleanCookies));
+    console.log("COOKIE_PREVIEW:\n" + previewLines);
+    // Diagnostic: analyze each line for tab counts and field counts
+    try {
+      const lines = cleanCookies.split('\n');
+      const diagnostics = lines.map((ln, idx) => {
+        const tabCount = (ln.match(/\t/g) || []).length;
+        const parts = ln.split('\t');
+        // Don't log cookie values; show masked info
+        let name = null;
+        let valLen = 0;
+        if (!ln.startsWith('#') && parts.length >= 6) {
+          name = parts[5] || null;
+          valLen = parts.slice(6).join('\t').length;
+        }
+        return {
+          i: idx + 1,
+          len: ln.length,
+          tabCount,
+          parts: parts.length,
+          isComment: ln.trim().startsWith('#'),
+          name: name ? (name.length > 8 ? name.slice(0, 8) + '...' : name) : null,
+          valueLength: valLen
+        };
+      });
+      // Log summary lines where parts !== 7 (Netscape expects 7 fields)
+      diagnostics.filter(d => !d.isComment && d.parts !== 7).forEach(d => {
+        console.log(`COOKIE_LINE_ISSUE: line=${d.i} parts=${d.parts} tabs=${d.tabCount} len=${d.len} name=${d.name} vlen=${d.valueLength}`);
+      });
+      console.log(`COOKIE_LINES_TOTAL: ${lines.length}`);
+    } catch (diagErr) {
+      console.error('COOKIE_DIAG_ERROR:', diagErr);
+    }
     return tempPath;
 
   } catch (e) {
