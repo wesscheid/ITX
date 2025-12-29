@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useState, memo } from 'react';
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void;
@@ -81,4 +81,4 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
   );
 };
 
-export default FileUpload;
+export default memo(FileUpload);

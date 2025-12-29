@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, lazy, Suspense } from 'react';
 import Header from './components/Header';
 import FileUpload from './components/FileUpload';
 import UrlInput from './components/UrlInput';
-import ProcessingState from './components/ProcessingState';
-import ResultCard from './components/ResultCard';
+
+const ProcessingState = lazy(() => import('./components/ProcessingState'));
+const ResultCard = lazy(() => import('./components/ResultCard'));
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult } from './types';
 import { fileToBase64 } from './utils/fileHelpers';
 import { translateVideo } from './services/geminiService';
@@ -84,22 +85,26 @@ const App: React.FC = () => {
   };
 
   // Error Parsing Logic
-  const isManualDownloadNeeded = errorMsg?.includes('MANUAL_DOWNLOAD_REQUIRED|');
-  const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.split('|')[1] : null;
-  
-  const isResolverError = errorMsg?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.includes('Failed to fetch');
+  const errorDisplayData = useMemo(() => {
+    const isManualDownloadNeeded = errorMsg?.includes('MANUAL_DOWNLOAD_REQUIRED|');
+    const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.split('|')[1] : null;
+    const isResolverError = errorMsg?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.includes('Failed to fetch');
 
-  // Friendly error message display
-  let displayErrorTitle = "Error";
-  let displayErrorText = errorMsg;
+    let displayErrorTitle = "Error";
+    let displayErrorText = errorMsg;
 
-  if (isManualDownloadNeeded) {
-    displayErrorTitle = "Automatic Download Blocked";
-    displayErrorText = "The browser blocked the automated download. This is common with Instagram links.";
-  } else if (isResolverError) {
-    displayErrorTitle = "Connection Failed";
-    displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
-  }
+    if (isManualDownloadNeeded) {
+      displayErrorTitle = "Automatic Download Blocked";
+      displayErrorText = "The browser blocked the automated download. This is common with Instagram links.";
+    } else if (isResolverError) {
+      displayErrorTitle = "Connection Failed";
+      displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
+    }
+
+    return { isManualDownloadNeeded, manualDownloadUrl, isResolverError, displayErrorTitle, displayErrorText };
+  }, [errorMsg]);
+
+  const { isManualDownloadNeeded, manualDownloadUrl, isResolverError, displayErrorTitle, displayErrorText } = errorDisplayData;
 
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300">
@@ -218,11 +223,17 @@ const App: React.FC = () => {
           )}
 
           {/* Processing State */}
-          {(status === AppStatus.PROCESSING || status === AppStatus.DOWNLOADING) && <ProcessingState status={status} />}
+          {(status === AppStatus.PROCESSING || status === AppStatus.DOWNLOADING) && (
+            <Suspense fallback={<div className="w-full py-12 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div></div>}>
+              <ProcessingState status={status} />
+            </Suspense>
+          )}
 
           {/* Result State */}
           {status === AppStatus.SUCCESS && result && (
-            <ResultCard result={result} onReset={handleReset} />
+            <Suspense fallback={<div className="w-full py-12 flex items-center justify-center"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-600"></div></div>}>
+              <ResultCard result={result} onReset={handleReset} />
+            </Suspense>
           )}
 
         </div>
