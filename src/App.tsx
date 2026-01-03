@@ -4,9 +4,9 @@ import FileUpload from './components/FileUpload';
 import UrlInput from './components/UrlInput';
 import ProcessingState from './components/ProcessingState';
 import ResultCard from './components/ResultCard';
-import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult } from './types';
-import { fileToBase64 } from './utils/fileHelpers';
-import { translateVideo } from './services/geminiService';
+import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
+import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
+import { translateVideo, translateVideoStream } from './services/geminiService';
 import { fetchVideoFromUrl } from './services/videoDownloaderService';
 
 const App: React.FC = () => {
@@ -16,6 +16,11 @@ const App: React.FC = () => {
   const [result, setResult] = useState<ProcessingResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
+  const [progress, setProgress] = useState<ProcessingProgress>({
+    stage: 'downloading',
+    percentage: 0,
+    message: 'Preparing...'
+  });
 
   // Initialize theme based on system preference
   useEffect(() => {
@@ -36,23 +41,37 @@ const App: React.FC = () => {
   const toggleTheme = () => setIsDark(!isDark);
 
   const processFile = async (file: File) => {
-    if (file.size > 50 * 1024 * 1024) {
-      setErrorMsg("File is too large. Please upload a video under 50MB.");
+    // Validate file before processing
+    const validation = validateFile(file);
+    if (!validation.isValid) {
+      setErrorMsg(validation.error || "Invalid file");
       setStatus(AppStatus.ERROR);
       return;
     }
 
+    setProgress({ stage: 'processing', percentage: 0, message: 'Processing video...' });
     setStatus(AppStatus.PROCESSING);
     
     try {
-      const base64Data = await fileToBase64(file);
-      const data = await translateVideo(base64Data, file.type, selectedLanguage);
+      // Use optimized processing with progress tracking
+      const chunks = await processFileInChunks(file, 5 * 1024 * 1024, (progress) => {
+        setProgress(prev => ({
+          ...prev,
+          percentage: progress,
+          message: `Processing: ${progress}%`
+        }));
+      });
+
+      const blob = chunksToBlob(chunks, file.type);
+      const data = await translateVideoStream(blob, file.type, selectedLanguage);
+      
       setResult(data);
+      setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg("An error occurred while processing the video with Gemini.");
+      setErrorMsg((error as Error).message || "An error occurred while processing the video with Gemini.");
     }
   };
 
@@ -63,6 +82,7 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
+    setProgress({ stage: 'downloading', percentage: 0, message: 'Downloading video...' });
     setStatus(AppStatus.DOWNLOADING);
 
     try {
@@ -79,6 +99,7 @@ const App: React.FC = () => {
     setStatus(AppStatus.IDLE);
     setResult(null);
     setErrorMsg(null);
+    setProgress({ stage: 'downloading', percentage: 0, message: 'Preparing...' });
   };
 
   // Error Parsing Logic
@@ -216,7 +237,7 @@ const App: React.FC = () => {
           )}
 
           {/* Processing State */}
-          {(status === AppStatus.PROCESSING || status === AppStatus.DOWNLOADING) && <ProcessingState status={status} />}
+          {(status === AppStatus.PROCESSING || status === AppStatus.DOWNLOADING) && <ProcessingState status={status} progress={progress} />}
 
           {/* Result State */}
           {status === AppStatus.SUCCESS && result && (

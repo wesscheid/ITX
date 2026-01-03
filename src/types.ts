@@ -17,6 +17,17 @@ export interface LanguageOption {
   name: string;
 }
 
+export interface ProcessingProgress {
+  stage: 'downloading' | 'processing' | 'transcribing' | 'complete';
+  percentage: number;
+  message: string;
+}
+
+export interface FileValidationResult {
+  isValid: boolean;
+  error?: string;
+}
+
 export const SUPPORTED_LANGUAGES: LanguageOption[] = [
   { code: 'en', name: 'English' },
   { code: 'es', name: 'Spanish' },
