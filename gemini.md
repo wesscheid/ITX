@@ -46,6 +46,11 @@ The backend uses a local `yt-dlp` binary to handle video resolution and download
     2.  Runs `yt-dlp --get-url` (or specific flags per platform) to find the direct video link.
     3.  Proxies the download to the client.
 
+### C. Cookie Management
+-   **Requirement:** `yt-dlp` requires cookies in **Netscape** format to bypass bot detection on platforms like Instagram and YouTube.
+-   **Current State:** Cookies are often provided in JSON format (e.g., from browser extensions).
+-   **Solution:** The backend includes a conversion utility to automatically transform JSON cookies into the Netscape format required by `yt-dlp` at runtime. This ensures flexibility when updating session cookies.
+
 ## 5. Deployment (Render)
 The application is deployed as a single "Web Service" on Render.
 -   **Build Command:** `npm run render-build`
