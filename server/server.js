@@ -12,7 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Initialize Gemini
-const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
+const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -319,21 +319,6 @@ app.post("/api/transcribe", async (req, res) => {
   if (!url) return res.status(400).json({ error: "Missing URL" });
 
   try {
-    const model = genAI.getGenerativeModel({ 
-      model: "gemini-2.5-flash",
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["originalText", "translatedText"],
-        },
-      }
-    });
-
     const prompt = `
       Analyze this media file (Audio or Video).
       1. Transcribe the spoken audio verbatim in its original language.
@@ -349,12 +334,26 @@ app.post("/api/transcribe", async (req, res) => {
     if (isYouTube) {
       try {
         console.log("Attempting direct YouTube processing via Gemini...");
-        const result = await model.generateContent([prompt, url]);
-        const text = result.response.text();
+        const result = await genAI.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: { parts: [{ text: prompt }, { text: url }] },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                originalText: { type: Type.STRING },
+                translatedText: { type: Type.STRING },
+              },
+              required: ["originalText", "translatedText"],
+            },
+          }
+        });
+        
+        const text = result.response.text;
         if (text && text.trim().startsWith('{')) {
           return res.json(JSON.parse(text));
         }
-        console.warn("Direct YouTube response was not valid JSON, falling back to yt-dlp");
       } catch (e) {
         console.warn("Direct YouTube processing failed, falling back to yt-dlp:", e.message);
       }
@@ -394,17 +393,35 @@ app.post("/api/transcribe", async (req, res) => {
         }
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
-        const result = await model.generateContent([
-          {
-            inlineData: {
-              data: buffer.toString("base64"),
-              mimeType: "audio/mp4" // Using audio/mp4 for best compatibility
-            }
+        const result = await genAI.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: {
+            parts: [
+              {
+                inlineData: {
+                  data: buffer.toString("base64"),
+                  mimeType: "audio/mp4"
+                }
+              },
+              {
+                text: prompt
+              }
+            ]
           },
-          prompt
-        ]);
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                originalText: { type: Type.STRING },
+                translatedText: { type: Type.STRING },
+              },
+              required: ["originalText", "translatedText"],
+            },
+          }
+        });
         
-        res.json(JSON.parse(result.response.text()));
+        res.json(JSON.parse(result.response.text));
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
         if (!res.headersSent) res.status(500).json({ error: "Gemini failed to process the media." });
