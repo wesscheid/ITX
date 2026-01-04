@@ -59,110 +59,123 @@ function getCookiesPath() {
   let rawCookies = null;
   const secretPath = "/etc/secrets/cookies.txt";
 
-  // 1. Get Raw Content
+  // 1. Check locations for cookies
   if (fs.existsSync(secretPath)) {
-    console.log("✅ Found Vercel Secret File");
+    console.log("✅ Found Render Secret File");
     try {
-      rawCookies = fs.readFileSync(secretPath, 'utf8');
+      rawCookies = fs.readFileSync(secretPath, "utf8");
     } catch (e) {
       console.error("Error reading secret file:", e);
     }
-  } 
-  
+  }
+
   if (!rawCookies && process.env.IG_COOKIES) {
     console.log("✅ Using IG_COOKIES env var");
     rawCookies = process.env.IG_COOKIES;
   }
 
-  // 3. Root File check
-  const rootCookiesPath = path.join(__dirname, "../cookies.txt");
-  if (!rawCookies && fs.existsSync(rootCookiesPath)) {
-    console.log("✅ Using root cookies.txt");
-    try {
-      rawCookies = fs.readFileSync(rootCookiesPath, 'utf8');
-    } catch (e) {
-      console.error("Error reading root cookies file:", e);
+  if (!rawCookies) {
+    const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
+    const rootCookiesEnv = path.join(__dirname, "../cookies.env");
+    if (fs.existsSync(rootCookiesTxt)) {
+      console.log("✅ Using root cookies.txt");
+      rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
+    } else if (fs.existsSync(rootCookiesEnv)) {
+      console.log("✅ Using root cookies.env");
+      rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
     }
   }
 
   if (!rawCookies) return null;
 
   try {
-    // If the provided cookies look like a JSON export (e.g. browser export),
-    // convert them to Netscape format lines so yt-dlp accepts them.
-    const maybe = rawCookies.trim();
-    if (maybe.startsWith('{') || maybe.startsWith('[')) {
+    const trimmed = rawCookies.trim();
+
+    // A. Check if already in Netscape format
+    if (trimmed.startsWith("# Netscape") || trimmed.includes("\tTRUE\t")) {
+      const tempPath = path.join(os.tmpdir(), "cookies.txt");
+      // Ensure header exists
+      const content = trimmed.startsWith("# Netscape") 
+        ? trimmed 
+        : "# Netscape HTTP Cookie File\n" + trimmed;
+      fs.writeFileSync(tempPath, content + "\n");
+      return tempPath;
+    }
+
+    // B. Handle JSON format
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      console.log("🔄 Detecting JSON cookies, converting...");
       try {
-        const parsed = JSON.parse(maybe);
+        let parsed = JSON.parse(trimmed);
+        // Some extensions wrap in { "cookies": [...] }
+        if (!Array.isArray(parsed) && parsed.cookies) parsed = parsed.cookies;
+
         if (Array.isArray(parsed)) {
-          const jsonLines = parsed.map((c) => {
-            const domain = c.domain || c.host || '';
-            const httpOnly = !!c.httpOnly;
-            const prefix = httpOnly ? '#HttpOnly_' : '';
-            const outDomain = domain.startsWith('.') ? domain : `.${domain}`;
-            const flag = 'TRUE';
-            const pathv = c.path || '/';
-            const secure = c.secure ? 'TRUE' : 'FALSE';
+          const netscapeLines = parsed.map((c) => {
+            const domain = c.domain || c.host || "";
+            const httpOnly = c.httpOnly === true;
+            const prefix = httpOnly ? "#HttpOnly_" : "";
+            // yt-dlp/curl prefer leading dots for domains that aren't specific to one host
+            let outDomain = domain;
+            if (outDomain && !outDomain.startsWith(".") && outDomain.includes(".") && !httpOnly) {
+              // outDomain = "." + outDomain; // Optional, but common
+            }
+            const flag = "TRUE";
+            const pathv = c.path || "/";
+            const secure = c.secure ? "TRUE" : "FALSE";
             const expires = c.expirationDate ? Math.floor(Number(c.expirationDate)) : 0;
-            const name = c.name || '';
-            const value = c.value || '';
+            const name = c.name || "";
+            const value = c.value || "";
             return `${prefix}${outDomain}\t${flag}\t${pathv}\t${secure}\t${expires}\t${name}\t${value}`;
           });
-          rawCookies = jsonLines.join('\n');
+
+          const finalCookies = "# Netscape HTTP Cookie File\n" + netscapeLines.join("\n") + "\n";
+          const tempPath = path.join(os.tmpdir(), "cookies.txt");
+          fs.writeFileSync(tempPath, finalCookies);
+          console.log("✅ Successfully converted JSON cookies to Netscape format");
+          return tempPath;
         }
       } catch (jsonErr) {
-        // Ignore JSON parse errors and fall back to existing cleaning logic
+        console.warn("Failed to parse JSON, falling back to cleaning logic:", jsonErr.message);
       }
     }
 
-    // 2. Process & Clean
-    const lines = rawCookies.split('\n');
+    // C. Fallback: Process & Clean messy/pasted Netscape format
+    const lines = trimmed.split("\n");
     const cleanedLines = [];
-    
-    lines.forEach(line => {
-      // Remove potential copy-paste prefixes like "1 " or "│ 1 "
-      let l = line.replace(/^[│|]?\s*\d+\s+/, '').replace(/[│|]\s*$/, '').trim();
+
+    lines.forEach((line) => {
+      // Remove common copy-paste artifacts
+      let l = line.replace(/^[│|]?\s*\d+\s+/, "").replace(/[│|]\s*$/, "").trim();
       if (!l) return;
 
-      // Check if this is a start of a new cookie line or comment
-      // Valid starts: "# ", "#HttpOnly_", ".instagram.com", "instagram.com"
-      const isStart = l.startsWith('#') || l.startsWith('.'); 
-      
-      if (isStart || cleanedLines.length === 0) {
+      // In a real Netscape file, lines start with #, a dot, or a domain name
+      // If it looks like a continuation (no tabs and doesn't look like a domain), we might append, 
+      // but it's safer to just treat every line as a new line if it has enough parts.
+      if (l.split(/\s+/).length >= 7 || l.startsWith("#") || l.startsWith(".")) {
         cleanedLines.push(l);
-      } else {
-        // Likely a wrapped line (continuation of previous value)
-        // Append to last line
+      } else if (cleanedLines.length > 0) {
         cleanedLines[cleanedLines.length - 1] += l;
       }
     });
 
-    // 3. Fix Separators (Spaces -> Tabs)
-    const finalLines = cleanedLines.map(l => {
-      // Preserve human comments that start with "# " exactly
-      if (l.startsWith('# ')) return l;
-
-      // If no tabs, try to fix space separation
-      if (!l.includes('\t')) {
-         const parts = l.split(/\s+/);
-         // A valid line should have at least 7 parts (last part is value)
-         if (parts.length >= 7) {
-             // Reconstruct: first 6 with tabs, rest joined (value)
-             // Use a space between value parts to avoid concatenation errors
-             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join(' ');
-         }
+    const finalLines = cleanedLines.map((l) => {
+      if (l.startsWith("# ")) return l;
+      if (!l.includes("\t")) {
+        const parts = l.split(/\s+/);
+        if (parts.length >= 7) {
+          return parts.slice(0, 6).join("\t") + "\t" + parts.slice(6).join(" ");
+        }
       }
       return l;
     });
 
-    // Prepend the Netscape cookie file header and ensure trailing newline
-    const header = '# Netscape HTTP Cookie File';
-    const cleanCookies = header + '\n' + finalLines.join('\n') + '\n';
+    const header = "# Netscape HTTP Cookie File";
+    const cleanCookies = header + "\n" + finalLines.join("\n") + "\n";
     const tempPath = path.join(os.tmpdir(), "cookies.txt");
     fs.writeFileSync(tempPath, cleanCookies);
-    
-    return tempPath;
 
+    return tempPath;
   } catch (e) {
     console.error("Failed to process cookies:", e);
     return null;
