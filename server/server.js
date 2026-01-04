@@ -343,8 +343,13 @@ app.post("/api/transcribe", async (req, res) => {
 
     const child = spawn(YTDLP_PATH, args);
     let chunks = [];
+    let stderrData = "";
     let totalLength = 0;
     
+    child.stderr.on("data", (data) => {
+      stderrData += data.toString();
+    });
+
     child.stdout.on("data", (chunk) => {
       chunks.push(chunk);
       totalLength += chunk.length;
@@ -359,13 +364,17 @@ app.post("/api/transcribe", async (req, res) => {
       try {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
-          console.error("Buffer is empty after yt-dlp");
-          return res.status(500).json({ error: `Failed to fetch media bytes (empty buffer). yt-dlp exit code: ${code}` });
+          console.error("Buffer is empty after yt-dlp. Exit code:", code);
+          console.error("yt-dlp stderr:", stderrData);
+          return res.status(500).json({ 
+            error: `Failed to fetch media bytes (empty buffer).`, 
+            details: stderrData || `yt-dlp exited with code ${code}` 
+          });
         }
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
         const response = await genAI.models.generateContent({
-          model: "gemini-1.5-flash", // Using 1.5-flash for maximum reliability
+          model: "gemini-1.5-flash",
           contents: {
             parts: [
               {
@@ -392,9 +401,15 @@ app.post("/api/transcribe", async (req, res) => {
           }
         });
         
+        // Log basic info about the response
+        console.log("Gemini response received. Candidates:", response.candidates?.length);
+        
         if (!response.text) {
-          console.error("Gemini API Full Response:", JSON.stringify(response));
-          throw new Error("Gemini returned an empty response (no text content).");
+          console.error("Gemini API Empty Response Object:", JSON.stringify(response));
+          // Check for safety ratings if text is missing
+          const safetyRatings = response.candidates?.[0]?.safetyRatings;
+          const finishReason = response.candidates?.[0]?.finishReason;
+          throw new Error(`Gemini returned an empty response. Finish Reason: ${finishReason || 'UNKNOWN'}. Safety: ${JSON.stringify(safetyRatings || [])}`);
         }
 
         res.json(JSON.parse(response.text));
