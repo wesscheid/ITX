@@ -6,7 +6,7 @@ import ProcessingState from './components/ProcessingState';
 import ResultCard from './components/ResultCard';
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
 import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
-import { translateVideo, translateVideoStream } from './services/geminiService';
+import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
 import { fetchVideoFromUrl } from './services/videoDownloaderService';
 
 const App: React.FC = () => {
@@ -82,20 +82,20 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setProgress({ stage: 'downloading', percentage: 0, message: 'Downloading video...' });
-    setStatus(AppStatus.DOWNLOADING);
+    setProgress({ stage: 'processing', percentage: 0, message: 'Processing with Gemini (Byte-Transfer)...' });
+    setStatus(AppStatus.PROCESSING);
 
     try {
-      const blob = await fetchVideoFromUrl(url, (status) => 
-        setProgress(prev => ({ ...prev, message: status }))
-      );
-      // Convert Blob to File for processFile
-      const file = new File([blob], "downloaded_video.mp4", { type: blob.type || 'video/mp4' });
-      await processFile(file);
+      // Direct Byte Transfer: No browser download needed!
+      const data = await transcribeUrl(url, selectedLanguage);
+      
+      setResult(data);
+      setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
+      setStatus(AppStatus.SUCCESS);
     } catch (error: any) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg(error.message || "Failed to download video from URL.");
+      setErrorMsg(error.message || "Failed to process video via byte-transfer.");
     }
   };
 
