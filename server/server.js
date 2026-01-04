@@ -347,12 +347,20 @@ app.post("/api/transcribe", async (req, res) => {
     const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
     
     if (isYouTube) {
-      console.log("Processing YouTube URL directly via Gemini...");
-      const result = await model.generateContent([prompt, url]);
-      return res.json(JSON.parse(result.response.text()));
+      try {
+        console.log("Attempting direct YouTube processing via Gemini...");
+        const result = await model.generateContent([prompt, url]);
+        const text = result.response.text();
+        if (text && text.trim().startsWith('{')) {
+          return res.json(JSON.parse(text));
+        }
+        console.warn("Direct YouTube response was not valid JSON, falling back to yt-dlp");
+      } catch (e) {
+        console.warn("Direct YouTube processing failed, falling back to yt-dlp:", e.message);
+      }
     }
 
-    // 2. Other platforms: Fetch bytes via yt-dlp
+    // 2. Other platforms (or YouTube fallback): Fetch bytes via yt-dlp
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath();
     const args = [
