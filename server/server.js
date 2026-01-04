@@ -328,47 +328,17 @@ app.post("/api/transcribe", async (req, res) => {
       If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
-    // 1. Check if YouTube (Direct URL support)
-    const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
-    
-    if (isYouTube) {
-      try {
-        console.log("Attempting direct YouTube processing via Gemini...");
-        const result = await genAI.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: { parts: [{ text: prompt }, { text: url }] },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                originalText: { type: Type.STRING },
-                translatedText: { type: Type.STRING },
-              },
-              required: ["originalText", "translatedText"],
-            },
-          }
-        });
-        
-        const text = result.response.text;
-        if (text && text.trim().startsWith('{')) {
-          return res.json(JSON.parse(text));
-        }
-      } catch (e) {
-        console.warn("Direct YouTube processing failed, falling back to yt-dlp:", e.message);
-      }
-    }
-
-    // 2. Other platforms (or YouTube fallback): Fetch bytes via yt-dlp
+    // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath();
     const args = [
-      "-f", "bestaudio/best/best",
+      "-f", "ba[ext=m4a]/ba/bestaudio/best",
       "--no-playlist",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
       "-o", "-",
       url
     ];
+
     if (cookiePath) args.unshift("--cookies", cookiePath);
 
     const child = spawn(YTDLP_PATH, args);
@@ -389,7 +359,8 @@ app.post("/api/transcribe", async (req, res) => {
       try {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
-          return res.status(500).json({ error: "Failed to fetch media bytes (empty buffer)" });
+          console.error("Buffer is empty after yt-dlp");
+          return res.status(500).json({ error: `Failed to fetch media bytes (empty buffer). yt-dlp exit code: ${code}` });
         }
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
@@ -421,10 +392,19 @@ app.post("/api/transcribe", async (req, res) => {
           }
         });
         
+        if (!result.response || !result.response.text) {
+          throw new Error("Gemini returned an empty response.");
+        }
+
         res.json(JSON.parse(result.response.text));
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
-        if (!res.headersSent) res.status(500).json({ error: "Gemini failed to process the media." });
+        if (!res.headersSent) {
+          res.status(500).json({ 
+            error: `Gemini processing failed: ${geminiErr.message}`,
+            details: geminiErr.stack
+          });
+        }
       }
     });
 
