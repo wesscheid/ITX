@@ -1,13 +1,18 @@
 // backend/server.js
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const { exec, spawn } = require("child_process");
 const fs = require("fs");
-const path = require("path");
 const os = require("os");
+const { GoogleGenAI, Type } = require("@google/genai");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+
+// Initialize Gemini
+const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY });
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -306,6 +311,107 @@ app.get("/api/download", (req, res) => {
     if (code !== 0) console.error("Download process exited with code:", code);
     if (!res.headersSent) res.end();
   });
+});
+
+// ---------- TRANSCRIBE & TRANSLATE (Direct Byte Transfer) ----------
+app.post("/api/transcribe", async (req, res) => {
+  const { url, targetLanguage } = req.body;
+  if (!url) return res.status(400).json({ error: "Missing URL" });
+
+  try {
+    const model = genAI.getGenerativeModel({ 
+      model: "gemini-2.5-flash",
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["originalText", "translatedText"],
+        },
+      }
+    });
+
+    const prompt = `
+      Analyze this media file (Audio or Video).
+      1. Transcribe the spoken audio verbatim in its original language.
+      2. Translate the transcription into ${targetLanguage || 'English'}.
+      
+      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+    `;
+
+    // 1. Check if YouTube (Direct URL support)
+    const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
+    
+    if (isYouTube) {
+      console.log("Processing YouTube URL directly via Gemini...");
+      const result = await model.generateContent([prompt, url]);
+      return res.json(JSON.parse(result.response.text()));
+    }
+
+    // 2. Other platforms: Fetch bytes via yt-dlp
+    console.log("Fetching bytes for platform:", url);
+    const cookiePath = getCookiesPath();
+    const args = [
+      "-f", "bestaudio/best/best",
+      "--no-playlist",
+      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      "-o", "-",
+      url
+    ];
+    if (cookiePath) args.unshift("--cookies", cookiePath);
+
+    const child = spawn(YTDLP_PATH, args);
+    let chunks = [];
+    let totalLength = 0;
+    
+    child.stdout.on("data", (chunk) => {
+      chunks.push(chunk);
+      totalLength += chunk.length;
+      // Safety: limit to 20MB for inlineData to avoid payload limits
+      if (totalLength > 20 * 1024 * 1024) {
+        console.warn("File too large, truncating at 20MB");
+        child.kill();
+      }
+    });
+
+    child.on("close", async (code) => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        if (buffer.length === 0) {
+          return res.status(500).json({ error: "Failed to fetch media bytes (empty buffer)" });
+        }
+
+        console.log(`Sending ${buffer.length} bytes to Gemini...`);
+        const result = await model.generateContent([
+          {
+            inlineData: {
+              data: buffer.toString("base64"),
+              mimeType: "audio/mp4" // Using audio/mp4 for best compatibility
+            }
+          },
+          prompt
+        ]);
+        
+        res.json(JSON.parse(result.response.text()));
+      } catch (geminiErr) {
+        console.error("Gemini processing error:", geminiErr);
+        if (!res.headersSent) res.status(500).json({ error: "Gemini failed to process the media." });
+      }
+    });
+
+    child.on("error", (e) => {
+      console.error("Spawn error:", e);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to start downloader." });
+    });
+
+  } catch (error) {
+    console.error("Transcription error:", error);
+    if (!res.headersSent) res.status(500).json({ error: error.message });
+  }
 });
 
 // ---------- Start server ----------
