@@ -106,20 +106,57 @@ function getCookiesPath() {
     if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
       console.log("🔄 Detecting JSON cookies, converting...");
       try {
-        let parsed = JSON.parse(trimmed);
-        // Some extensions wrap in { "cookies": [...] }
-        if (!Array.isArray(parsed) && parsed.cookies) parsed = parsed.cookies;
+        // Handle files with multiple JSON arrays/objects (e.g. concatenated exports)
+        // We find all top-level arrays [] or objects {}
+        const jsonBlocks = [];
+        let depth = 0;
+        let start = -1;
+        let inString = false;
 
-        if (Array.isArray(parsed)) {
-          const netscapeLines = parsed.map((c) => {
+        for (let i = 0; i < trimmed.length; i++) {
+          const char = trimmed[i];
+          if (char === '"' && trimmed[i - 1] !== "\\") inString = !inString;
+          if (inString) continue;
+
+          if (char === "[" || char === "{") {
+            if (depth === 0) start = i;
+            depth++;
+          } else if (char === "]" || char === "}") {
+            depth--;
+            if (depth === 0 && start !== -1) {
+              jsonBlocks.push(trimmed.slice(start, i + 1));
+              start = -1;
+            }
+          }
+        }
+
+        const allCookies = [];
+        for (const block of jsonBlocks) {
+          try {
+            let parsed = JSON.parse(block);
+            if (!Array.isArray(parsed) && parsed.cookies) parsed = parsed.cookies;
+            if (Array.isArray(parsed)) {
+              allCookies.push(...parsed);
+            } else if (typeof parsed === "object" && parsed !== null) {
+              allCookies.push(parsed);
+            }
+          } catch (e) {
+            console.warn("Failed to parse a JSON block, skipping...");
+          }
+        }
+
+        if (allCookies.length > 0) {
+          const netscapeLines = allCookies.map((c) => {
             const domain = c.domain || c.host || "";
             const httpOnly = c.httpOnly === true;
             const prefix = httpOnly ? "#HttpOnly_" : "";
+            
             // yt-dlp/curl prefer leading dots for domains that aren't specific to one host
             let outDomain = domain;
             if (outDomain && !outDomain.startsWith(".") && outDomain.includes(".") && !httpOnly) {
-              // outDomain = "." + outDomain; // Optional, but common
+              outDomain = "." + outDomain;
             }
+
             const flag = "TRUE";
             const pathv = c.path || "/";
             const secure = c.secure ? "TRUE" : "FALSE";
@@ -132,11 +169,11 @@ function getCookiesPath() {
           const finalCookies = "# Netscape HTTP Cookie File\n" + netscapeLines.join("\n") + "\n";
           const tempPath = path.join(os.tmpdir(), "cookies.txt");
           fs.writeFileSync(tempPath, finalCookies);
-          console.log("✅ Successfully converted JSON cookies to Netscape format");
+          console.log(`✅ Successfully converted ${allCookies.length} JSON cookies to Netscape format`);
           return tempPath;
         }
       } catch (jsonErr) {
-        console.warn("Failed to parse JSON, falling back to cleaning logic:", jsonErr.message);
+        console.warn("Failed to parse JSON blocks, falling back to cleaning logic:", jsonErr.message);
       }
     }
 
@@ -483,6 +520,13 @@ app.use((req, res) => {
 });
 
 if (require.main === module) {
+  // Add Deno to PATH if it exists (for Render)
+  const denoPath = path.join(os.homedir(), ".deno", "bin");
+  if (fs.existsSync(denoPath)) {
+    process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
+    console.log("🦕 Deno added to PATH for yt-dlp");
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Universal Downloader Backend: http://localhost:${PORT}`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
