@@ -8,7 +8,7 @@ const ResultCard = lazy(() => import('./components/ResultCard'));
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult } from './types';
 import { fileToBase64 } from './utils/fileHelpers';
 import { translateVideo } from './services/geminiService';
-import { fetchVideoFromUrl } from './services/videoDownloaderService';
+import { fetchVideoFromUrl } from './src/services/videoDownloaderService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
