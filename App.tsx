@@ -7,7 +7,7 @@ const ProcessingState = lazy(() => import('./components/ProcessingState'));
 const ResultCard = lazy(() => import('./components/ResultCard'));
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult } from './types';
 import { fileToBase64 } from './utils/fileHelpers';
-import { translateVideo } from './services/geminiService';
+import { translateVideo, transcribeUrl } from './services/geminiService';
 import { fetchVideoFromUrl } from './src/services/videoDownloaderService';
 
 const App: React.FC = () => {
@@ -64,17 +64,16 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setStatus(AppStatus.DOWNLOADING);
+    setStatus(AppStatus.PROCESSING); // Skip straight to processing
 
     try {
-      const blob = await fetchVideoFromUrl(url, (status) => console.log(status));
-      // Convert Blob to File to satisfy TypeScript and downstream logic
-      const file = new File([blob], "downloaded_video.mp4", { type: blob.type || 'video/mp4' });
-      await processFile(file);
+      const data = await transcribeUrl(url, selectedLanguage);
+      setResult(data);
+      setStatus(AppStatus.SUCCESS);
     } catch (error: any) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg(error.message || "Failed to download video from URL.");
+      setErrorMsg(error.message || "Failed to process video from URL.");
     }
   };
 
