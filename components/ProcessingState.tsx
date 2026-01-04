@@ -10,7 +10,7 @@ const ProcessingState: React.FC<ProcessingStateProps> = ({ status }) => {
 
   return (
     <div className="w-full py-12 flex flex-col items-center justify-center space-y-4 animate-in fade-in duration-500">
-      <div className="relative w-16 h-16">
+      <div className="relative w-32 h-32">
         <video 
           src="/logoAnimated.webm" 
           autoPlay 
