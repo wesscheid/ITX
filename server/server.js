@@ -74,6 +74,17 @@ function getCookiesPath() {
     rawCookies = process.env.IG_COOKIES;
   }
 
+  // 3. Root File check
+  const rootCookiesPath = path.join(__dirname, "../cookies.txt");
+  if (!rawCookies && fs.existsSync(rootCookiesPath)) {
+    console.log("✅ Using root cookies.txt");
+    try {
+      rawCookies = fs.readFileSync(rootCookiesPath, 'utf8');
+    } catch (e) {
+      console.error("Error reading root cookies file:", e);
+    }
+  }
+
   if (!rawCookies) return null;
 
   try {
@@ -187,7 +198,7 @@ app.get("/api/resolve", (req, res) => {
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
   // 1. Try to get direct URL first (faster for some sites)
-  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\\"')}"`;
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
 
   exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
     if (!err && stdout.trim()) {
@@ -209,7 +220,7 @@ app.get("/api/resolve", (req, res) => {
 
     // 2. Fallback to full JSON metadata extraction (-J)
     // This is robust but slower.
-    const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
+    const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\"')}"`;
     
     exec(metaCmd, { maxBuffer: 50 * 1024 * 1024 }, (mErr, mOut) => {
       if (mErr) {
@@ -366,40 +377,54 @@ app.post("/api/transcribe", async (req, res) => {
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
           console.error("yt-dlp stderr:", stderrData);
-          return res.status(500).json({ 
-            error: `Failed to fetch media bytes (empty buffer).`, 
-            details: stderrData || `yt-dlp exited with code ${code}` 
+          return res.status(500).json({
+            error: `Failed to fetch media bytes (empty buffer).`,
+            details: stderrData || `yt-dlp exited with code ${code}`
           });
         }
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
-        const response = await genAI.models.generateContent({
-          model: "gemini-1.5-flash",
-          contents: {
-            parts: [
-              {
-                inlineData: {
-                  data: buffer.toString("base64"),
-                  mimeType: "audio/mp4"
+        let response;
+        try {
+          response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash", // Updated for 2026 compatibility
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: buffer.toString("base64"),
+                    mimeType: "audio/mp4"
+                  }
+                },
+                {
+                  text: prompt
                 }
-              },
-              {
-                text: prompt
-              }
-            ]
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                originalText: { type: Type.STRING },
-                translatedText: { type: Type.STRING },
-              },
-              required: ["originalText", "translatedText"],
+              ]
             },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  originalText: { type: Type.STRING },
+                  translatedText: { type: Type.STRING },
+                },
+                required: ["originalText", "translatedText"],
+              },
+            }
+          });
+        } catch (initialErr) {
+          if (initialErr.message?.includes('not found')) {
+            console.error("Primary model not found, attempting to list models...");
+            try {
+              const modelList = await genAI.models.list();
+              console.log("Available models:", modelList.map(m => m.name).join(', '));
+            } catch (listErr) {
+              console.error("Could not list models:", listErr.message);
+            }
           }
-        });
+          throw initialErr;
+        }
         
         // Log basic info about the response
         console.log("Gemini response received. Candidates:", response.candidates?.length);
@@ -416,7 +441,7 @@ app.post("/api/transcribe", async (req, res) => {
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
         if (!res.headersSent) {
-          res.status(500).json({ 
+          res.status(500).json({
             error: `Gemini processing failed: ${geminiErr.message}`,
             details: geminiErr.stack
           });
