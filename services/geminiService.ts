@@ -64,3 +64,30 @@ export const translateVideo = async (
     throw error;
   }
 };
+
+/**
+ * NEW: Calls the backend to handle the full byte-transfer pipeline.
+ */
+export const transcribeUrl = async (
+  url: string,
+  targetLanguage: string
+): Promise<ProcessingResult> => {
+  const response = await fetch('/api/transcribe', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ url, targetLanguage }),
+  });
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || 'Failed to transcribe video');
+  }
+
+  const result = await response.json();
+  return {
+    ...result,
+    language: targetLanguage
+  };
+};
