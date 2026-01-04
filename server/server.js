@@ -364,8 +364,8 @@ app.post("/api/transcribe", async (req, res) => {
         }
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
-        const result = await genAI.models.generateContent({
-          model: "gemini-2.5-flash",
+        const response = await genAI.models.generateContent({
+          model: "gemini-1.5-flash", // Using 1.5-flash for maximum reliability
           contents: {
             parts: [
               {
@@ -392,11 +392,12 @@ app.post("/api/transcribe", async (req, res) => {
           }
         });
         
-        if (!result.response || !result.response.text) {
-          throw new Error("Gemini returned an empty response.");
+        if (!response.text) {
+          console.error("Gemini API Full Response:", JSON.stringify(response));
+          throw new Error("Gemini returned an empty response (no text content).");
         }
 
-        res.json(JSON.parse(result.response.text));
+        res.json(JSON.parse(response.text));
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
         if (!res.headersSent) {
