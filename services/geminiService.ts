@@ -72,22 +72,36 @@ export const transcribeUrl = async (
   url: string,
   targetLanguage: string
 ): Promise<ProcessingResult> => {
-  const response = await fetch('/api/transcribe', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url, targetLanguage }),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
 
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to transcribe video');
+  try {
+    const response = await fetch('/api/transcribe', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ url, targetLanguage }),
+      signal: controller.signal
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || `Server Error (${response.status})`);
+    }
+
+    const result = await response.json();
+    return {
+      ...result,
+      language: targetLanguage
+    };
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error('Transcription timed out. The video might be too long or the server is busy.');
+    }
+    throw error;
   }
-
-  const result = await response.json();
-  return {
-    ...result,
-    language: targetLanguage
-  };
 };
