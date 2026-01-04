@@ -95,7 +95,7 @@ const App: React.FC = () => {
 
     if (isManualDownloadNeeded) {
       displayErrorTitle = "Automatic Download Blocked";
-      displayErrorText = "The browser blocked the automated download. This is common with Instagram links.";
+      displayErrorText = "The browser or platform blocked the automated download.";
     } else if (isResolverError) {
       displayErrorTitle = "Connection Failed";
       displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
@@ -197,7 +197,7 @@ const App: React.FC = () => {
                       Click to Download Audio
                     </a>
                     <p className="mt-3 text-xs text-slate-500 dark:text-slate-500">
-                      Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file "extracted_audio.mp3".
+                      Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file.
                     </p>
                   </div>
                 )}
@@ -212,8 +212,8 @@ const App: React.FC = () => {
                       Since your network is blocking our resolver, please use a third-party website to download the file first.
                     </p>
                     <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 mb-3">
-                      <li>Go to a site like <strong>SnapInsta</strong> or <strong>SaveIG</strong>.</li>
-                      <li>Paste your Instagram link there and download the video/audio.</li>
+                      <li>Go to a downloader site for your specific platform (e.g. SnapInsta for IG, SaveFrom for YouTube).</li>
+                      <li>Paste your link there and download the video/audio.</li>
                       <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
                     </ol>
                   </div>

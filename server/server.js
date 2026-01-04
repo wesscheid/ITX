@@ -42,26 +42,6 @@ app.get("/health", (req, res) => {
 });
 
 // ---------- Helpers ----------
-function isInstagramUrl(url) {
-  return /(?:https?:\/\/)?(www\.)?instagram\.com\//i.test(url || "");
-}
-function isYouTubeUrl(url) {
-  return /(?:https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(
-    url || ""
-  );
-}
-function normalizeYouTube(url) {
-  let u = (url || "").trim();
-  const shortsMatch = u.match(/\/shorts\/([^\/\?]+)/);
-  if (shortsMatch) return `https://www.youtube.com/watch?v=${shortsMatch[1]}`;
-  const shortMatch = u.match(/youtu\.be\/([^\/\?]+)/);
-  if (shortMatch) return `https://www.youtube.com/watch?v=${shortMatch[1]}`;
-  return u;
-}
-function isValidYouTubeVideo(url) {
-  const clean = normalizeYouTube(url);
-  return /youtube\.com\/watch\?/.test(clean) || /youtu\.be\//.test(clean);
-}
 function safeFileName(base, ext) {
   const s = String(base || "download")
     .replace(/[^a-z0-9_\-]/gi, "_")
@@ -164,46 +144,7 @@ function getCookiesPath() {
     const cleanCookies = header + '\n' + finalLines.join('\n') + '\n';
     const tempPath = path.join(os.tmpdir(), "cookies.txt");
     fs.writeFileSync(tempPath, cleanCookies);
-    // Log a masked preview for debugging (don't leak full secrets)
-    const previewLines = cleanCookies
-      .split('\n')
-      .slice(0, 10)
-      .map(l => l.replace(/(sessionid\t)[^\t]+/, '$1[REDACTED]'))
-      .join('\n');
-    console.log("✅ Wrote cleaned cookies to", tempPath);
-    console.log("COOKIE_BYTES:", Buffer.byteLength(cleanCookies));
-    console.log("COOKIE_PREVIEW:\n" + previewLines);
-    // Diagnostic: analyze each line for tab counts and field counts
-    try {
-      const lines = cleanCookies.split('\n');
-      const diagnostics = lines.map((ln, idx) => {
-        const tabCount = (ln.match(/\t/g) || []).length;
-        const parts = ln.split('\t');
-        // Don't log cookie values; show masked info
-        let name = null;
-        let valLen = 0;
-        if (!ln.startsWith('#') && parts.length >= 6) {
-          name = parts[5] || null;
-          valLen = parts.slice(6).join('\t').length;
-        }
-        return {
-          i: idx + 1,
-          len: ln.length,
-          tabCount,
-          parts: parts.length,
-          isComment: ln.trim().startsWith('#'),
-          name: name ? (name.length > 8 ? name.slice(0, 8) + '...' : name) : null,
-          valueLength: valLen
-        };
-      });
-      // Log summary lines where parts !== 7 (Netscape expects 7 fields)
-      diagnostics.filter(d => !d.isComment && d.parts !== 7).forEach(d => {
-        console.log(`COOKIE_LINE_ISSUE: line=${d.i} parts=${d.parts} tabs=${d.tabCount} len=${d.len} name=${d.name} vlen=${d.valueLength}`);
-      });
-      console.log(`COOKIE_LINES_TOTAL: ${lines.length}`);
-    } catch (diagErr) {
-      console.error('COOKIE_DIAG_ERROR:', diagErr);
-    }
+    
     return tempPath;
 
   } catch (e) {
@@ -213,21 +154,15 @@ function getCookiesPath() {
 }
 
 // ======================================================
-//  INSTAGRAM
+//  GENERIC DOWNLOADER
 // ======================================================
 
-// ---------- Instagram PREVIEW (single preview with audio) ----------
-app.get("/api/instagram", (req, res) => {
+// ---------- RESOLVE METADATA (Preview) ----------
+app.get("/api/resolve", (req, res) => {
   const { url } = req.query;
 
   if (!url) {
     return res.status(400).json({ error: "Missing URL" });
-  }
-  // Cross‑platform check
-  if (!isInstagramUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid Instagram URL. Please paste an Instagram link." });
   }
 
   if (!fs.existsSync(YTDLP_PATH)) {
@@ -246,82 +181,84 @@ app.get("/api/instagram", (req, res) => {
   const cookiePath = getCookiesPath();
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
-  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
-    /"/g,
-    '\\"'
-  )}"`;
+  // 1. Try to get direct URL first (faster for some sites)
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\\"')}"`;
 
-  exec(
-    cmd,
-    { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      if (!err && stdout.trim()) {
-        const data = {
-          type: "video",
-          can_preview: true,
-          preview_url: stdout.trim(),
-          download_url: `/api/instagram/download?url=${encodeURIComponent(
-            cleanUrl
-          )}`,
-          username: "instagram",
-          title: "Instagram media"
-        };
-        // Cache the result
-        metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
-        return res.json(data);
+  exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    if (!err && stdout.trim()) {
+      // Success - we have a direct link
+      const data = {
+        type: "video",
+        can_preview: true,
+        preview_url: stdout.trim(), // Might be a direct video stream
+        download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
+        title: "Video Media" 
+      };
+      
+      // Try to get title/uploader separately if possible, but don't block
+      // Ideally we run -J for everything, but --get-url is faster for a quick preview check
+      
+      metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
+      return res.json(data);
+    }
+
+    // 2. Fallback to full JSON metadata extraction (-J)
+    // This is robust but slower.
+    const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
+    
+    exec(metaCmd, { maxBuffer: 50 * 1024 * 1024 }, (mErr, mOut) => {
+      if (mErr) {
+        const errorMsg = stderr || mErr.message;
+        console.error("Metadata error:", errorMsg);
+        return res
+          .status(500)
+          .json({ error: "Failed to resolve video", details: errorMsg });
       }
 
-      // Fallback metadata
-      const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-      exec(metaCmd, { maxBuffer: 20 * 1024 * 1024 }, (mErr, mOut) => {
-        if (mErr) {
-          const errorMsg = stderr || mErr.message;
-          console.error("IG metadata error:", errorMsg);
-          return res
-            .status(500)
-            .json({ error: "Instagram fetch failed", details: errorMsg, retry: true });
+      try {
+        const data = JSON.parse(mOut);
+        
+        // Find best format if not already in root
+        let previewUrl = data.url;
+        if (!previewUrl && data.formats) {
+           const best = data.formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').pop();
+           if (best) previewUrl = best.url;
         }
-        try {
-          const data = JSON.parse(mOut);
-          const responseData = {
-            type: "video",
-            can_preview: false,
-            preview_url: data.thumbnail || null,
-            download_url: `/api/instagram/download?url=${encodeURIComponent(
-              cleanUrl
-            )}`,
-            username: data.uploader || "instagram",
-            title: data.title || "Instagram media"
-          };
-          // Cache the result
-          metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
-          res.json(responseData);
-        } catch {
-          res.status(500).json({ error: "Instagram parse failed" });
-        }
-      });
-    }
-  );
+
+        const responseData = {
+          type: "video",
+          can_preview: !!previewUrl,
+          preview_url: previewUrl || data.thumbnail || null,
+          download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
+          username: data.uploader || data.channel || "unknown",
+          title: data.title || "Video Media",
+          is_youtube: data.extractor_key === 'Youtube',
+          duration: data.duration
+        };
+
+        metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
+        res.json(responseData);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+        res.status(500).json({ error: "Failed to parse video metadata" });
+      }
+    });
+  });
 });
 
-// ---------- Instagram DOWNLOAD ----------
-app.get("/api/instagram/download", (req, res) => {
+// ---------- DOWNLOAD CONTENT ----------
+app.get("/api/download", (req, res) => {
   const { url } = req.query;
 
   if (!url) {
     return res.status(400).json({ error: "Missing URL" });
-  }
-  if (!isInstagramUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid Instagram URL. Please paste an Instagram link." });
   }
 
   if (!fs.existsSync(YTDLP_PATH)) {
     return res.status(503).json({ error: "yt-dlp not available" });
   }
 
-  const filename = safeFileName("instagram", ".mp4");
+  const filename = safeFileName("video", ".mp4");
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${filename}"`
@@ -351,173 +288,22 @@ app.get("/api/instagram/download", (req, res) => {
 
   const child = spawn(YTDLP_PATH, args);
   child.stdout.pipe(res);
-  child.stderr.on("data", (d) =>
-    console.error("IG download:", d.toString())
-  );
+  
+  child.stderr.on("data", (d) => {
+    // Only log significant errors/warnings to avoid clutter
+    const msg = d.toString();
+    if (msg.toLowerCase().includes('error')) {
+      console.error("DL Error:", msg);
+    }
+  });
+
   child.on("error", (e) => {
-    console.error("IG spawn error:", e);
+    console.error("Spawn error:", e);
     if (!res.headersSent) res.status(500).end();
   });
+  
   child.on("close", (code) => {
-    if (code !== 0) console.error("IG close code:", code);
-    if (!res.headersSent) res.end();
-  });
-});
-
-// ======================================================
-//  YOUTUBE
-// ======================================================
-
-// ---------- YouTube PREVIEW ----------
-app.get("/api/youtube", (req, res) => {
-  const { url } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-  // Cross‑platform check
-  if (!isYouTubeUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid YouTube URL. Please paste a YouTube link." });
-  }
-
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not installed" });
-  }
-
-  const cleanUrl = normalizeYouTube(url);
-
-  if (!isValidYouTubeVideo(cleanUrl)) {
-    return res.status(400).json({
-      error:
-        "Invalid YouTube video URL. Use formats like youtube.com/watch?v=ID, youtu.be/ID, or /shorts/ID",
-      example: "https://youtube.com/shorts/DpMsAo4clKk"
-    });
-  }
-
-  const cmd = `"${YTDLP_PATH}" -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-//const cmd = `"${YTDLP_PATH}" --js-runtimes deno -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-
-  exec(cmd, { maxBuffer: 30 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) {
-      const msg = stderr?.toString() || err.message;
-      // JS runtime / cookies error from your logs
-      if (msg.includes("No supported JavaScript runtime") ||
-          msg.includes("Sign in to confirm you’re not a bot")) {
-        console.error("YouTube blocked:", msg);
-        return res.status(503).json({
-          error:
-            "YouTube is temporarily blocking automated downloads for this video. Try another video or later.",
-          technical: "JS runtime / cookies required"
-        });
-      }
-
-      console.error("YouTube error:", msg);
-      return res.status(500).json({ error: "YouTube fetch failed" });
-    }
-
-    let data;
-    try {
-      data = JSON.parse(stdout);
-    } catch {
-      return res.status(500).json({ error: "Invalid YouTube response" });
-    }
-
-    const formats = Array.isArray(data.formats) ? data.formats : [];
-    const progressive = formats.filter(
-      (f) =>
-        f.url &&
-        f.vcodec !== "none" &&
-        f.acodec !== "none" &&
-        (!f.height || f.height <= 720)
-    );
-    const best = progressive.sort(
-      (a, b) => (b.tbr || 0) - (a.tbr || 0)
-    )[0];
-
-    res.json({
-      type: "video",
-      can_preview: !!best?.url,
-      preview_url: best?.url || data.thumbnail || null,
-      download_url: `/api/youtube/download?url=${encodeURIComponent(
-        cleanUrl
-      )}&title=${encodeURIComponent(data.title || "youtube")}`,
-      username: data.uploader || data.channel || "youtube",
-      title: data.title || "YouTube video"
-    });
-  });
-});
-
-// ---------- YouTube DOWNLOAD ----------
-app.get("/api/youtube/download", (req, res) => {
-  const { url, title } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-  if (!isYouTubeUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid YouTube URL. Please paste a YouTube link." });
-  }
-
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not available" });
-  }
-
-  const cleanUrl = normalizeYouTube(url);
-
-  if (!isValidYouTubeVideo(cleanUrl)) {
-    return res.status(400).json({
-      error:
-        "Invalid YouTube video URL. Use formats like youtube.com/watch?v=ID, youtu.be/ID, or /shorts/ID"
-    });
-  }
-
-  const filename = safeFileName(title || "youtube_video", ".mp4");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${filename}"`
-  );
-  res.setHeader("Content-Type", "video/mp4");
-
-  const args = [
-    "-f",
-    "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-    "--merge-output-format",
-    "mp4",
-    "--recode-video",
-    "mp4",
-    "--postprocessor-args",
-    "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
-    "-o",
-    "-",
-    cleanUrl
-  ];
-
-  /*const args = [
-  "--js-runtimes", "deno",
-  "-f", "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-  "--merge-output-format", "mp4",
-  "--recode-video", "mp4",
-  "--postprocessor-args", "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
-  "-o", "-",
-  cleanUrl
-];
-*/
-
-  const child = spawn(YTDLP_PATH, args);
-  child.stdout.pipe(res);
-  child.stderr.on("data", (d) =>
-    console.error("YT download:", d.toString())
-  );
-  child.on("error", (e) => {
-    console.error("YT spawn error:", e);
-    if (!res.headersSent) res.status(500).end();
-  });
-  child.on("close", (code) => {
-    if (code !== 0) console.error("YT close code:", code);
+    if (code !== 0) console.error("Download process exited with code:", code);
     if (!res.headersSent) res.end();
   });
 });
@@ -533,7 +319,7 @@ app.use((req, res) => {
 
 if (require.main === module) {
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
+    console.log(`✅ Universal Downloader Backend: http://localhost:${PORT}`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
   });
 }
