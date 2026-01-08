@@ -10,3 +10,38 @@
 .dark .custom-scrollbar::-webkit-scrollbar-track { background: #1e293b; }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: #475569; }
 .dark .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* Custom spinner animations */
+@keyframes glow {
+  0% {
+    box-shadow: 0 0 5px rgba(147, 51, 234, 0.3);
+  }
+  100% {
+    box-shadow: 0 0 15px rgba(147, 51, 234, 0.6);
+  }
+}
+
+@keyframes breathe {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.05);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Enhanced spinner styles for better dark mode visibility */
+.dark .spinner-ring {
+  border-color: rgba(168, 85, 247, 0.3);
+}
+
+.spinner-ring {
+  border-color: rgba(147, 51, 234, 0.3);
+}
+
+.animate-breathe {
+  animation: breathe 3s ease-in-out infinite;
+}

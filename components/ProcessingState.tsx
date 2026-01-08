@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 import { AppStatus } from '../types';
 
 interface ProcessingStateProps {
@@ -10,9 +10,15 @@ const ProcessingState: React.FC<ProcessingStateProps> = ({ status }) => {
 
   return (
     <div className="w-full py-12 flex flex-col items-center justify-center space-y-4 animate-in fade-in duration-500">
-      <div className="relative w-16 h-16">
-        <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-200 dark:border-slate-700 rounded-full"></div>
-        <div className="absolute top-0 left-0 w-full h-full border-4 border-purple-600 dark:border-purple-500 rounded-full border-t-transparent animate-spin"></div>
+      <div className="relative w-32 h-32">
+        <video 
+          src="/logoAnimated.webm" 
+          autoPlay 
+          loop 
+          muted 
+          playsInline
+          className="w-full h-full object-contain"
+        />
       </div>
       <div className="text-center">
         <h3 className="text-lg font-semibold text-slate-800 dark:text-slate-200">
@@ -31,4 +37,4 @@ const ProcessingState: React.FC<ProcessingStateProps> = ({ status }) => {
   );
 };
 
-export default ProcessingState;
+export default memo(ProcessingState);

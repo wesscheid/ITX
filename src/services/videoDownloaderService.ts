@@ -172,17 +172,36 @@ const resolveViaAlternative = async (targetUrl: string): Promise<string> => {
   throw new Error(`All Alternative instances failed. Last error: ${lastError?.message || 'Unknown'}`);
 };
 
+// New: Retry logic with exponential backoff
+const retryWithBackoff = async <T>(
+  fn: () => Promise<T>,
+  retries: number = 3,
+  baseDelay: number = 1000
+): Promise<T> => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (i === retries - 1) throw error;
+      
+      const delay = baseDelay * Math.pow(2, i);
+      console.warn(`Attempt ${i + 1} failed, retrying in ${delay}ms...`, error);
+      await new Promise(resolve => setTimeout(resolve, delay));
+    }
+  }
+  throw new Error('All retry attempts failed');
+};
+
 export const fetchVideoFromUrl = async (url: string): Promise<File> => {
   let downloadUrl: string | undefined;
   
-  // STEP 1: RESOLUTION
-  // Try Cobalt first, then fallback to Alternative
+  // STEP 1: RESOLUTION with retry logic
   try {
-    downloadUrl = await resolveViaCobalt(url);
+    downloadUrl = await retryWithBackoff(() => resolveViaCobalt(url), 2, 2000);
   } catch (cobaltError) {
     console.warn("Cobalt Resolver failed, switching to fallback:", cobaltError);
     try {
-      downloadUrl = await resolveViaAlternative(url);
+      downloadUrl = await retryWithBackoff(() => resolveViaAlternative(url), 2, 3000);
     } catch (altError) {
       console.error("All Resolvers failed:", altError);
       throw new Error("RESOLVER_CONNECTION_ERROR");
@@ -193,25 +212,29 @@ export const fetchVideoFromUrl = async (url: string): Promise<File> => {
     throw new Error("RESOLVER_CONNECTION_ERROR");
   }
 
-  // STEP 2: DOWNLOAD VIA PROXIES
+  // STEP 2: DOWNLOAD VIA PROXIES with retry logic
   for (const proxyGen of MEDIA_PROXIES) {
     try {
       const proxyUrl = proxyGen(downloadUrl);
       console.log(`Downloading media via: ${proxyUrl}`);
       
-      const mediaResponse = await fetch(proxyUrl);
-      
-      if (!mediaResponse.ok) {
-        continue;
-      }
+      const blob = await retryWithBackoff(async () => {
+        const mediaResponse = await fetch(proxyUrl);
+        
+        if (!mediaResponse.ok) {
+          throw new Error(`HTTP ${mediaResponse.status}`);
+        }
 
-      const blob = await mediaResponse.blob();
-      
-      // Validation: Ensure we didn't get an HTML error page
-      if (blob.type.includes('text/html') || blob.size < 1000) {
-         continue;
-      }
-      
+        const blob = await mediaResponse.blob();
+        
+        // Validation: Ensure we didn't get an HTML error page
+        if (blob.type.includes('text/html') || blob.size < 1000) {
+           throw new Error('Received HTML response instead of media');
+        }
+        
+        return blob;
+      }, 2, 1500);
+
       const mimeType = blob.type || 'audio/mp3';
       let extension = mimeType.split('/')[1] || 'mp3';
       if (extension.includes(';')) extension = extension.split(';')[0];

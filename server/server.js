@@ -4,9 +4,14 @@ const cors = require("cors");
 const { exec, spawn } = require("child_process");
 const fs = require("fs");
 const path = require("path");
+const os = require("os");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+
+// Simple in-memory cache for metadata
+const metadataCache = new Map();
+const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
@@ -64,6 +69,149 @@ function safeFileName(base, ext) {
   return `${s}_${Date.now()}${ext}`;
 }
 
+// ---------- Cookies Helper ----------
+function getCookiesPath() {
+  let rawCookies = null;
+  const secretPath = "/etc/secrets/cookies.txt";
+
+  // 1. Get Raw Content
+  if (fs.existsSync(secretPath)) {
+    console.log("✅ Found Vercel Secret File");
+    try {
+      rawCookies = fs.readFileSync(secretPath, 'utf8');
+    } catch (e) {
+      console.error("Error reading secret file:", e);
+    }
+  } 
+  
+  if (!rawCookies && process.env.IG_COOKIES) {
+    console.log("✅ Using IG_COOKIES env var");
+    rawCookies = process.env.IG_COOKIES;
+  }
+
+  if (!rawCookies) return null;
+
+  try {
+    // If the provided cookies look like a JSON export (e.g. browser export),
+    // convert them to Netscape format lines so yt-dlp accepts them.
+    const maybe = rawCookies.trim();
+    if (maybe.startsWith('{') || maybe.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(maybe);
+        if (Array.isArray(parsed)) {
+          const jsonLines = parsed.map((c) => {
+            const domain = c.domain || c.host || '';
+            const httpOnly = !!c.httpOnly;
+            const prefix = httpOnly ? '#HttpOnly_' : '';
+            const outDomain = domain.startsWith('.') ? domain : `.${domain}`;
+            const flag = 'TRUE';
+            const pathv = c.path || '/';
+            const secure = c.secure ? 'TRUE' : 'FALSE';
+            const expires = c.expirationDate ? Math.floor(Number(c.expirationDate)) : 0;
+            const name = c.name || '';
+            const value = c.value || '';
+            return `${prefix}${outDomain}\t${flag}\t${pathv}\t${secure}\t${expires}\t${name}\t${value}`;
+          });
+          rawCookies = jsonLines.join('\n');
+        }
+      } catch (jsonErr) {
+        // Ignore JSON parse errors and fall back to existing cleaning logic
+      }
+    }
+
+    // 2. Process & Clean
+    const lines = rawCookies.split('\n');
+    const cleanedLines = [];
+    
+    lines.forEach(line => {
+      // Remove potential copy-paste prefixes like "1 " or "│ 1 "
+      let l = line.replace(/^[│|]?\s*\d+\s+/, '').replace(/[│|]\s*$/, '').trim();
+      if (!l) return;
+
+      // Check if this is a start of a new cookie line or comment
+      // Valid starts: "# ", "#HttpOnly_", ".instagram.com", "instagram.com"
+      const isStart = l.startsWith('#') || l.startsWith('.'); 
+      
+      if (isStart || cleanedLines.length === 0) {
+        cleanedLines.push(l);
+      } else {
+        // Likely a wrapped line (continuation of previous value)
+        // Append to last line
+        cleanedLines[cleanedLines.length - 1] += l;
+      }
+    });
+
+    // 3. Fix Separators (Spaces -> Tabs)
+    const finalLines = cleanedLines.map(l => {
+      // Preserve human comments that start with "# " exactly
+      if (l.startsWith('# ')) return l;
+
+      // If no tabs, try to fix space separation
+      if (!l.includes('\t')) {
+         const parts = l.split(/\s+/);
+         // A valid line should have at least 7 parts (last part is value)
+         if (parts.length >= 7) {
+             // Reconstruct: first 6 with tabs, rest joined (value)
+             // Use a space between value parts to avoid concatenation errors
+             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join(' ');
+         }
+      }
+      return l;
+    });
+
+    // Prepend the Netscape cookie file header and ensure trailing newline
+    const header = '# Netscape HTTP Cookie File';
+    const cleanCookies = header + '\n' + finalLines.join('\n') + '\n';
+    const tempPath = path.join(os.tmpdir(), "cookies.txt");
+    fs.writeFileSync(tempPath, cleanCookies);
+    // Log a masked preview for debugging (don't leak full secrets)
+    const previewLines = cleanCookies
+      .split('\n')
+      .slice(0, 10)
+      .map(l => l.replace(/(sessionid\t)[^\t]+/, '$1[REDACTED]'))
+      .join('\n');
+    console.log("✅ Wrote cleaned cookies to", tempPath);
+    console.log("COOKIE_BYTES:", Buffer.byteLength(cleanCookies));
+    console.log("COOKIE_PREVIEW:\n" + previewLines);
+    // Diagnostic: analyze each line for tab counts and field counts
+    try {
+      const lines = cleanCookies.split('\n');
+      const diagnostics = lines.map((ln, idx) => {
+        const tabCount = (ln.match(/\t/g) || []).length;
+        const parts = ln.split('\t');
+        // Don't log cookie values; show masked info
+        let name = null;
+        let valLen = 0;
+        if (!ln.startsWith('#') && parts.length >= 6) {
+          name = parts[5] || null;
+          valLen = parts.slice(6).join('\t').length;
+        }
+        return {
+          i: idx + 1,
+          len: ln.length,
+          tabCount,
+          parts: parts.length,
+          isComment: ln.trim().startsWith('#'),
+          name: name ? (name.length > 8 ? name.slice(0, 8) + '...' : name) : null,
+          valueLength: valLen
+        };
+      });
+      // Log summary lines where parts !== 7 (Netscape expects 7 fields)
+      diagnostics.filter(d => !d.isComment && d.parts !== 7).forEach(d => {
+        console.log(`COOKIE_LINE_ISSUE: line=${d.i} parts=${d.parts} tabs=${d.tabCount} len=${d.len} name=${d.name} vlen=${d.valueLength}`);
+      });
+      console.log(`COOKIE_LINES_TOTAL: ${lines.length}`);
+    } catch (diagErr) {
+      console.error('COOKIE_DIAG_ERROR:', diagErr);
+    }
+    return tempPath;
+
+  } catch (e) {
+    console.error("Failed to process cookies:", e);
+    return null;
+  }
+}
+
 // ======================================================
 //  INSTAGRAM
 // ======================================================
@@ -88,7 +236,17 @@ app.get("/api/instagram", (req, res) => {
 
   const cleanUrl = url.trim();
 
-  const cmd = `"${YTDLP_PATH}" --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
+  // Check cache
+  const cached = metadataCache.get(cleanUrl);
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+    console.log('Serving from cache for', cleanUrl);
+    return res.json(cached.data);
+  }
+
+  const cookiePath = getCookiesPath();
+  const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
+
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
     /"/g,
     '\\"'
   )}"`;
@@ -98,7 +256,7 @@ app.get("/api/instagram", (req, res) => {
     { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
     (err, stdout, stderr) => {
       if (!err && stdout.trim()) {
-        return res.json({
+        const data = {
           type: "video",
           can_preview: true,
           preview_url: stdout.trim(),
@@ -107,11 +265,14 @@ app.get("/api/instagram", (req, res) => {
           )}`,
           username: "instagram",
           title: "Instagram media"
-        });
+        };
+        // Cache the result
+        metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
+        return res.json(data);
       }
 
       // Fallback metadata
-      const metaCmd = `"${YTDLP_PATH}" -J "${cleanUrl.replace(/"/g, '\\"')}"`;
+      const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
       exec(metaCmd, { maxBuffer: 20 * 1024 * 1024 }, (mErr, mOut) => {
         if (mErr) {
           const errorMsg = stderr || mErr.message;
@@ -122,7 +283,7 @@ app.get("/api/instagram", (req, res) => {
         }
         try {
           const data = JSON.parse(mOut);
-          res.json({
+          const responseData = {
             type: "video",
             can_preview: false,
             preview_url: data.thumbnail || null,
@@ -131,7 +292,10 @@ app.get("/api/instagram", (req, res) => {
             )}`,
             username: data.uploader || "instagram",
             title: data.title || "Instagram media"
-          });
+          };
+          // Cache the result
+          metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
+          res.json(responseData);
         } catch {
           res.status(500).json({ error: "Instagram parse failed" });
         }
@@ -164,7 +328,10 @@ app.get("/api/instagram/download", (req, res) => {
   );
   res.setHeader("Content-Type", "video/mp4");
 
+  const cookiePath = getCookiesPath();
   const args = [
+    "--user-agent",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
     "-f",
     "best[height<=720][ext=mp4]/best[ext=mp4]/best",
     "--merge-output-format",
@@ -177,6 +344,10 @@ app.get("/api/instagram/download", (req, res) => {
     "-",
     url
   ];
+
+  if (cookiePath) {
+    args.unshift("--cookies", cookiePath);
+  }
 
   const child = spawn(YTDLP_PATH, args);
   child.stdout.pipe(res);
@@ -356,11 +527,15 @@ app.get("/api/youtube/download", (req, res) => {
 const distPath = path.join(__dirname, "../dist");
 app.use(express.static(distPath));
 
-app.get("*", (req, res) => {
+app.use((req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
-  console.log(`🔗 Health: http://localhost:${PORT}/health`);
-});
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
+    console.log(`🔗 Health: http://localhost:${PORT}/health`);
+  });
+}
+
+module.exports = app;

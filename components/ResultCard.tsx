@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, memo } from 'react';
 import { ProcessingResult } from '../types';
 import { downloadTextFile } from '../utils/fileHelpers';
 
@@ -137,4 +137,4 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
   );
 };
 
-export default ResultCard;
+export default memo(ResultCard);

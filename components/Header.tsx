@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { memo } from 'react';
 
 interface HeaderProps {
   isDark: boolean;
@@ -37,4 +37,4 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
   );
 };
 
-export default Header;
+export default memo(Header);
