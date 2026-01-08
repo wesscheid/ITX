@@ -1,13 +1,18 @@
 // backend/server.js
+const path = require("path");
+require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const { exec, spawn } = require("child_process");
 const fs = require("fs");
-const path = require("path");
 const os = require("os");
+const { GoogleGenAI, Type } = require("@google/genai");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+
+// Initialize Gemini
+const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -42,26 +47,6 @@ app.get("/health", (req, res) => {
 });
 
 // ---------- Helpers ----------
-function isInstagramUrl(url) {
-  return /(?:https?:\/\/)?(www\.)?instagram\.com\//i.test(url || "");
-}
-function isYouTubeUrl(url) {
-  return /(?:https?:\/\/)?(www\.)?(youtube\.com|youtu\.be|music\.youtube\.com)\//i.test(
-    url || ""
-  );
-}
-function normalizeYouTube(url) {
-  let u = (url || "").trim();
-  const shortsMatch = u.match(/\/shorts\/([^\/\?]+)/);
-  if (shortsMatch) return `https://www.youtube.com/watch?v=${shortsMatch[1]}`;
-  const shortMatch = u.match(/youtu\.be\/([^\/\?]+)/);
-  if (shortMatch) return `https://www.youtube.com/watch?v=${shortMatch[1]}`;
-  return u;
-}
-function isValidYouTubeVideo(url) {
-  const clean = normalizeYouTube(url);
-  return /youtube\.com\/watch\?/.test(clean) || /youtu\.be\//.test(clean);
-}
 function safeFileName(base, ext) {
   const s = String(base || "download")
     .replace(/[^a-z0-9_\-]/gi, "_")
@@ -74,138 +59,160 @@ function getCookiesPath() {
   let rawCookies = null;
   const secretPath = "/etc/secrets/cookies.txt";
 
-  // 1. Get Raw Content
+  // 1. Check locations for cookies
   if (fs.existsSync(secretPath)) {
-    console.log("✅ Found Vercel Secret File");
+    console.log("✅ Found Render Secret File");
     try {
-      rawCookies = fs.readFileSync(secretPath, 'utf8');
+      rawCookies = fs.readFileSync(secretPath, "utf8");
     } catch (e) {
       console.error("Error reading secret file:", e);
     }
-  } 
-  
+  }
+
   if (!rawCookies && process.env.IG_COOKIES) {
     console.log("✅ Using IG_COOKIES env var");
     rawCookies = process.env.IG_COOKIES;
   }
 
+  if (!rawCookies) {
+    const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
+    const rootCookiesEnv = path.join(__dirname, "../cookies.env");
+    if (fs.existsSync(rootCookiesTxt)) {
+      console.log("✅ Using root cookies.txt");
+      rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
+    } else if (fs.existsSync(rootCookiesEnv)) {
+      console.log("✅ Using root cookies.env");
+      rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
+    }
+  }
+
   if (!rawCookies) return null;
 
   try {
-    // If the provided cookies look like a JSON export (e.g. browser export),
-    // convert them to Netscape format lines so yt-dlp accepts them.
-    const maybe = rawCookies.trim();
-    if (maybe.startsWith('{') || maybe.startsWith('[')) {
+    const trimmed = rawCookies.trim();
+
+    // A. Check if already in Netscape format
+    if (trimmed.startsWith("# Netscape") || trimmed.includes("\tTRUE\t")) {
+      const tempPath = path.join(os.tmpdir(), "cookies.txt");
+      // Ensure header exists
+      const content = trimmed.startsWith("# Netscape") 
+        ? trimmed 
+        : "# Netscape HTTP Cookie File\n" + trimmed;
+      fs.writeFileSync(tempPath, content + "\n");
+      return tempPath;
+    }
+
+    // B. Handle JSON format
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      console.log("🔄 Detecting JSON cookies, converting...");
       try {
-        const parsed = JSON.parse(maybe);
-        if (Array.isArray(parsed)) {
-          const jsonLines = parsed.map((c) => {
-            const domain = c.domain || c.host || '';
-            const httpOnly = !!c.httpOnly;
-            const prefix = httpOnly ? '#HttpOnly_' : '';
-            const outDomain = domain.startsWith('.') ? domain : `.${domain}`;
-            const flag = 'TRUE';
-            const pathv = c.path || '/';
-            const secure = c.secure ? 'TRUE' : 'FALSE';
+        // Handle files with multiple JSON arrays/objects (e.g. concatenated exports)
+        // We find all top-level arrays [] or objects {}
+        const jsonBlocks = [];
+        let depth = 0;
+        let start = -1;
+        let inString = false;
+
+        for (let i = 0; i < trimmed.length; i++) {
+          const char = trimmed[i];
+          if (char === '"' && trimmed[i - 1] !== "\\") inString = !inString;
+          if (inString) continue;
+
+          if (char === "[" || char === "{") {
+            if (depth === 0) start = i;
+            depth++;
+          } else if (char === "]" || char === "}") {
+            depth--;
+            if (depth === 0 && start !== -1) {
+              jsonBlocks.push(trimmed.slice(start, i + 1));
+              start = -1;
+            }
+          }
+        }
+
+        const allCookies = [];
+        for (const block of jsonBlocks) {
+          try {
+            let parsed = JSON.parse(block);
+            if (!Array.isArray(parsed) && parsed.cookies) parsed = parsed.cookies;
+            if (Array.isArray(parsed)) {
+              allCookies.push(...parsed);
+            } else if (typeof parsed === "object" && parsed !== null) {
+              allCookies.push(parsed);
+            }
+          } catch (e) {
+            console.warn("Failed to parse a JSON block, skipping...");
+          }
+        }
+
+        if (allCookies.length > 0) {
+          const netscapeLines = allCookies.map((c) => {
+            const domain = c.domain || c.host || "";
+            const httpOnly = c.httpOnly === true;
+            const prefix = httpOnly ? "#HttpOnly_" : "";
+            
+            // yt-dlp/curl prefer leading dots for domains that aren't specific to one host
+            let outDomain = domain;
+            if (outDomain && !outDomain.startsWith(".") && outDomain.includes(".") && !httpOnly) {
+              outDomain = "." + outDomain;
+            }
+
+            const flag = "TRUE";
+            const pathv = c.path || "/";
+            const secure = c.secure ? "TRUE" : "FALSE";
             const expires = c.expirationDate ? Math.floor(Number(c.expirationDate)) : 0;
-            const name = c.name || '';
-            const value = c.value || '';
+            const name = c.name || "";
+            const value = c.value || "";
             return `${prefix}${outDomain}\t${flag}\t${pathv}\t${secure}\t${expires}\t${name}\t${value}`;
           });
-          rawCookies = jsonLines.join('\n');
+
+          const finalCookies = "# Netscape HTTP Cookie File\n" + netscapeLines.join("\n") + "\n";
+          const tempPath = path.join(os.tmpdir(), "cookies.txt");
+          fs.writeFileSync(tempPath, finalCookies);
+          console.log(`✅ Successfully converted ${allCookies.length} JSON cookies to Netscape format`);
+          return tempPath;
         }
       } catch (jsonErr) {
-        // Ignore JSON parse errors and fall back to existing cleaning logic
+        console.warn("Failed to parse JSON blocks, falling back to cleaning logic:", jsonErr.message);
       }
     }
 
-    // 2. Process & Clean
-    const lines = rawCookies.split('\n');
+    // C. Fallback: Process & Clean messy/pasted Netscape format
+    const lines = trimmed.split("\n");
     const cleanedLines = [];
-    
-    lines.forEach(line => {
-      // Remove potential copy-paste prefixes like "1 " or "│ 1 "
-      let l = line.replace(/^[│|]?\s*\d+\s+/, '').replace(/[│|]\s*$/, '').trim();
+
+    lines.forEach((line) => {
+      // Remove common copy-paste artifacts
+      let l = line.replace(/^[│|]?\s*\d+\s+/, "").replace(/[│|]\s*$/, "").trim();
       if (!l) return;
 
-      // Check if this is a start of a new cookie line or comment
-      // Valid starts: "# ", "#HttpOnly_", ".instagram.com", "instagram.com"
-      const isStart = l.startsWith('#') || l.startsWith('.'); 
-      
-      if (isStart || cleanedLines.length === 0) {
+      // In a real Netscape file, lines start with #, a dot, or a domain name
+      // If it looks like a continuation (no tabs and doesn't look like a domain), we might append, 
+      // but it's safer to just treat every line as a new line if it has enough parts.
+      if (l.split(/\s+/).length >= 7 || l.startsWith("#") || l.startsWith(".")) {
         cleanedLines.push(l);
-      } else {
-        // Likely a wrapped line (continuation of previous value)
-        // Append to last line
+      } else if (cleanedLines.length > 0) {
         cleanedLines[cleanedLines.length - 1] += l;
       }
     });
 
-    // 3. Fix Separators (Spaces -> Tabs)
-    const finalLines = cleanedLines.map(l => {
-      // Preserve human comments that start with "# " exactly
-      if (l.startsWith('# ')) return l;
-
-      // If no tabs, try to fix space separation
-      if (!l.includes('\t')) {
-         const parts = l.split(/\s+/);
-         // A valid line should have at least 7 parts (last part is value)
-         if (parts.length >= 7) {
-             // Reconstruct: first 6 with tabs, rest joined (value)
-             // Use a space between value parts to avoid concatenation errors
-             return parts.slice(0, 6).join('\t') + '\t' + parts.slice(6).join(' ');
-         }
+    const finalLines = cleanedLines.map((l) => {
+      if (l.startsWith("# ")) return l;
+      if (!l.includes("\t")) {
+        const parts = l.split(/\s+/);
+        if (parts.length >= 7) {
+          return parts.slice(0, 6).join("\t") + "\t" + parts.slice(6).join(" ");
+        }
       }
       return l;
     });
 
-    // Prepend the Netscape cookie file header and ensure trailing newline
-    const header = '# Netscape HTTP Cookie File';
-    const cleanCookies = header + '\n' + finalLines.join('\n') + '\n';
+    const header = "# Netscape HTTP Cookie File";
+    const cleanCookies = header + "\n" + finalLines.join("\n") + "\n";
     const tempPath = path.join(os.tmpdir(), "cookies.txt");
     fs.writeFileSync(tempPath, cleanCookies);
-    // Log a masked preview for debugging (don't leak full secrets)
-    const previewLines = cleanCookies
-      .split('\n')
-      .slice(0, 10)
-      .map(l => l.replace(/(sessionid\t)[^\t]+/, '$1[REDACTED]'))
-      .join('\n');
-    console.log("✅ Wrote cleaned cookies to", tempPath);
-    console.log("COOKIE_BYTES:", Buffer.byteLength(cleanCookies));
-    console.log("COOKIE_PREVIEW:\n" + previewLines);
-    // Diagnostic: analyze each line for tab counts and field counts
-    try {
-      const lines = cleanCookies.split('\n');
-      const diagnostics = lines.map((ln, idx) => {
-        const tabCount = (ln.match(/\t/g) || []).length;
-        const parts = ln.split('\t');
-        // Don't log cookie values; show masked info
-        let name = null;
-        let valLen = 0;
-        if (!ln.startsWith('#') && parts.length >= 6) {
-          name = parts[5] || null;
-          valLen = parts.slice(6).join('\t').length;
-        }
-        return {
-          i: idx + 1,
-          len: ln.length,
-          tabCount,
-          parts: parts.length,
-          isComment: ln.trim().startsWith('#'),
-          name: name ? (name.length > 8 ? name.slice(0, 8) + '...' : name) : null,
-          valueLength: valLen
-        };
-      });
-      // Log summary lines where parts !== 7 (Netscape expects 7 fields)
-      diagnostics.filter(d => !d.isComment && d.parts !== 7).forEach(d => {
-        console.log(`COOKIE_LINE_ISSUE: line=${d.i} parts=${d.parts} tabs=${d.tabCount} len=${d.len} name=${d.name} vlen=${d.valueLength}`);
-      });
-      console.log(`COOKIE_LINES_TOTAL: ${lines.length}`);
-    } catch (diagErr) {
-      console.error('COOKIE_DIAG_ERROR:', diagErr);
-    }
-    return tempPath;
 
+    return tempPath;
   } catch (e) {
     console.error("Failed to process cookies:", e);
     return null;
@@ -213,21 +220,15 @@ function getCookiesPath() {
 }
 
 // ======================================================
-//  INSTAGRAM
+//  GENERIC DOWNLOADER
 // ======================================================
 
-// ---------- Instagram PREVIEW (single preview with audio) ----------
-app.get("/api/instagram", (req, res) => {
+// ---------- RESOLVE METADATA (Preview) ----------
+app.get("/api/resolve", (req, res) => {
   const { url } = req.query;
 
   if (!url) {
     return res.status(400).json({ error: "Missing URL" });
-  }
-  // Cross‑platform check
-  if (!isInstagramUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid Instagram URL. Please paste an Instagram link." });
   }
 
   if (!fs.existsSync(YTDLP_PATH)) {
@@ -246,82 +247,84 @@ app.get("/api/instagram", (req, res) => {
   const cookiePath = getCookiesPath();
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
-  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(
-    /"/g,
-    '\\"'
-  )}"`;
+  // 1. Try to get direct URL first (faster for some sites)
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
 
-  exec(
-    cmd,
-    { timeout: 30000, maxBuffer: 10 * 1024 * 1024 },
-    (err, stdout, stderr) => {
-      if (!err && stdout.trim()) {
-        const data = {
-          type: "video",
-          can_preview: true,
-          preview_url: stdout.trim(),
-          download_url: `/api/instagram/download?url=${encodeURIComponent(
-            cleanUrl
-          )}`,
-          username: "instagram",
-          title: "Instagram media"
-        };
-        // Cache the result
-        metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
-        return res.json(data);
+  exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+    if (!err && stdout.trim()) {
+      // Success - we have a direct link
+      const data = {
+        type: "video",
+        can_preview: true,
+        preview_url: stdout.trim(), // Might be a direct video stream
+        download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
+        title: "Video Media" 
+      };
+      
+      // Try to get title/uploader separately if possible, but don't block
+      // Ideally we run -J for everything, but --get-url is faster for a quick preview check
+      
+      metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
+      return res.json(data);
+    }
+
+    // 2. Fallback to full JSON metadata extraction (-J)
+    // This is robust but slower.
+    const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\"')}"`;
+    
+    exec(metaCmd, { maxBuffer: 50 * 1024 * 1024 }, (mErr, mOut) => {
+      if (mErr) {
+        const errorMsg = stderr || mErr.message;
+        console.error("Metadata error:", errorMsg);
+        return res
+          .status(500)
+          .json({ error: "Failed to resolve video", details: errorMsg });
       }
 
-      // Fallback metadata
-      const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-      exec(metaCmd, { maxBuffer: 20 * 1024 * 1024 }, (mErr, mOut) => {
-        if (mErr) {
-          const errorMsg = stderr || mErr.message;
-          console.error("IG metadata error:", errorMsg);
-          return res
-            .status(500)
-            .json({ error: "Instagram fetch failed", details: errorMsg, retry: true });
+      try {
+        const data = JSON.parse(mOut);
+        
+        // Find best format if not already in root
+        let previewUrl = data.url;
+        if (!previewUrl && data.formats) {
+           const best = data.formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').pop();
+           if (best) previewUrl = best.url;
         }
-        try {
-          const data = JSON.parse(mOut);
-          const responseData = {
-            type: "video",
-            can_preview: false,
-            preview_url: data.thumbnail || null,
-            download_url: `/api/instagram/download?url=${encodeURIComponent(
-              cleanUrl
-            )}`,
-            username: data.uploader || "instagram",
-            title: data.title || "Instagram media"
-          };
-          // Cache the result
-          metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
-          res.json(responseData);
-        } catch {
-          res.status(500).json({ error: "Instagram parse failed" });
-        }
-      });
-    }
-  );
+
+        const responseData = {
+          type: "video",
+          can_preview: !!previewUrl,
+          preview_url: previewUrl || data.thumbnail || null,
+          download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
+          username: data.uploader || data.channel || "unknown",
+          title: data.title || "Video Media",
+          is_youtube: data.extractor_key === 'Youtube',
+          duration: data.duration
+        };
+
+        metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
+        res.json(responseData);
+      } catch (e) {
+        console.error("JSON parse error:", e);
+        res.status(500).json({ error: "Failed to parse video metadata" });
+      }
+    });
+  });
 });
 
-// ---------- Instagram DOWNLOAD ----------
-app.get("/api/instagram/download", (req, res) => {
+// ---------- DOWNLOAD CONTENT ----------
+app.get("/api/download", (req, res) => {
   const { url } = req.query;
 
   if (!url) {
     return res.status(400).json({ error: "Missing URL" });
-  }
-  if (!isInstagramUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid Instagram URL. Please paste an Instagram link." });
   }
 
   if (!fs.existsSync(YTDLP_PATH)) {
     return res.status(503).json({ error: "yt-dlp not available" });
   }
 
-  const filename = safeFileName("instagram", ".mp4");
+  const filename = safeFileName("video", ".mp4");
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${filename}"`
@@ -351,175 +354,160 @@ app.get("/api/instagram/download", (req, res) => {
 
   const child = spawn(YTDLP_PATH, args);
   child.stdout.pipe(res);
-  child.stderr.on("data", (d) =>
-    console.error("IG download:", d.toString())
-  );
+  
+  child.stderr.on("data", (d) => {
+    // Only log significant errors/warnings to avoid clutter
+    const msg = d.toString();
+    if (msg.toLowerCase().includes('error')) {
+      console.error("DL Error:", msg);
+    }
+  });
+
   child.on("error", (e) => {
-    console.error("IG spawn error:", e);
+    console.error("Spawn error:", e);
     if (!res.headersSent) res.status(500).end();
   });
+  
   child.on("close", (code) => {
-    if (code !== 0) console.error("IG close code:", code);
+    if (code !== 0) console.error("Download process exited with code:", code);
     if (!res.headersSent) res.end();
   });
 });
 
-// ======================================================
-//  YOUTUBE
-// ======================================================
+// ---------- TRANSCRIBE & TRANSLATE (Direct Byte Transfer) ----------
+app.post("/api/transcribe", async (req, res) => {
+  const { url, targetLanguage } = req.body;
+  if (!url) return res.status(400).json({ error: "Missing URL" });
 
-// ---------- YouTube PREVIEW ----------
-app.get("/api/youtube", (req, res) => {
-  const { url } = req.query;
+  try {
+    const prompt = `
+      Analyze this media file (Audio or Video).
+      1. Transcribe the spoken audio verbatim in its original language.
+      2. Translate the transcription into ${targetLanguage || 'English'}.
+      
+      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+    `;
 
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-  // Cross‑platform check
-  if (!isYouTubeUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid YouTube URL. Please paste a YouTube link." });
-  }
+    // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
+    console.log("Fetching bytes for platform:", url);
+    const cookiePath = getCookiesPath();
+    const args = [
+      "-f", "ba[ext=m4a]/ba/bestaudio/best",
+      "--no-playlist",
+      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      "-o", "-",
+      url
+    ];
 
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not installed" });
-  }
+    if (cookiePath) args.unshift("--cookies", cookiePath);
 
-  const cleanUrl = normalizeYouTube(url);
-
-  if (!isValidYouTubeVideo(cleanUrl)) {
-    return res.status(400).json({
-      error:
-        "Invalid YouTube video URL. Use formats like youtube.com/watch?v=ID, youtu.be/ID, or /shorts/ID",
-      example: "https://youtube.com/shorts/DpMsAo4clKk"
+    const child = spawn(YTDLP_PATH, args);
+    let chunks = [];
+    let stderrData = "";
+    let totalLength = 0;
+    
+    child.stderr.on("data", (data) => {
+      stderrData += data.toString();
     });
-  }
 
-  const cmd = `"${YTDLP_PATH}" -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-//const cmd = `"${YTDLP_PATH}" --js-runtimes deno -J "${cleanUrl.replace(/"/g, '\\"')}"`;
-
-  exec(cmd, { maxBuffer: 30 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (err) {
-      const msg = stderr?.toString() || err.message;
-      // JS runtime / cookies error from your logs
-      if (msg.includes("No supported JavaScript runtime") ||
-          msg.includes("Sign in to confirm you’re not a bot")) {
-        console.error("YouTube blocked:", msg);
-        return res.status(503).json({
-          error:
-            "YouTube is temporarily blocking automated downloads for this video. Try another video or later.",
-          technical: "JS runtime / cookies required"
-        });
+    child.stdout.on("data", (chunk) => {
+      chunks.push(chunk);
+      totalLength += chunk.length;
+      // Safety: limit to 20MB for inlineData to avoid payload limits
+      if (totalLength > 20 * 1024 * 1024) {
+        console.warn("File too large, truncating at 20MB");
+        child.kill();
       }
-
-      console.error("YouTube error:", msg);
-      return res.status(500).json({ error: "YouTube fetch failed" });
-    }
-
-    let data;
-    try {
-      data = JSON.parse(stdout);
-    } catch {
-      return res.status(500).json({ error: "Invalid YouTube response" });
-    }
-
-    const formats = Array.isArray(data.formats) ? data.formats : [];
-    const progressive = formats.filter(
-      (f) =>
-        f.url &&
-        f.vcodec !== "none" &&
-        f.acodec !== "none" &&
-        (!f.height || f.height <= 720)
-    );
-    const best = progressive.sort(
-      (a, b) => (b.tbr || 0) - (a.tbr || 0)
-    )[0];
-
-    res.json({
-      type: "video",
-      can_preview: !!best?.url,
-      preview_url: best?.url || data.thumbnail || null,
-      download_url: `/api/youtube/download?url=${encodeURIComponent(
-        cleanUrl
-      )}&title=${encodeURIComponent(data.title || "youtube")}`,
-      username: data.uploader || data.channel || "youtube",
-      title: data.title || "YouTube video"
     });
-  });
-});
 
-// ---------- YouTube DOWNLOAD ----------
-app.get("/api/youtube/download", (req, res) => {
-  const { url, title } = req.query;
+    child.on("close", async (code) => {
+      try {
+        const buffer = Buffer.concat(chunks);
+        if (buffer.length === 0) {
+          console.error("Buffer is empty after yt-dlp. Exit code:", code);
+          console.error("yt-dlp stderr:", stderrData);
+          return res.status(500).json({
+            error: `Failed to fetch media bytes (empty buffer).`,
+            details: stderrData || `yt-dlp exited with code ${code}`
+          });
+        }
 
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-  if (!isYouTubeUrl(url)) {
-    return res
-      .status(400)
-      .json({ error: "Invalid YouTube URL. Please paste a YouTube link." });
-  }
+        console.log(`Sending ${buffer.length} bytes to Gemini...`);
+        let response;
+        try {
+          response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash", // Updated for 2026 compatibility
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: buffer.toString("base64"),
+                    mimeType: "audio/mp4"
+                  }
+                },
+                {
+                  text: prompt
+                }
+              ]
+            },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  originalText: { type: Type.STRING },
+                  translatedText: { type: Type.STRING },
+                },
+                required: ["originalText", "translatedText"],
+              },
+            }
+          });
+        } catch (initialErr) {
+          if (initialErr.message?.includes('not found')) {
+            console.error("Primary model not found, attempting to list models...");
+            try {
+              const modelList = await genAI.models.list();
+              console.log("Available models:", modelList.map(m => m.name).join(', '));
+            } catch (listErr) {
+              console.error("Could not list models:", listErr.message);
+            }
+          }
+          throw initialErr;
+        }
+        
+        // Log basic info about the response
+        console.log("Gemini response received. Candidates:", response.candidates?.length);
+        
+        if (!response.text) {
+          console.error("Gemini API Empty Response Object:", JSON.stringify(response));
+          // Check for safety ratings if text is missing
+          const safetyRatings = response.candidates?.[0]?.safetyRatings;
+          const finishReason = response.candidates?.[0]?.finishReason;
+          throw new Error(`Gemini returned an empty response. Finish Reason: ${finishReason || 'UNKNOWN'}. Safety: ${JSON.stringify(safetyRatings || [])}`);
+        }
 
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not available" });
-  }
-
-  const cleanUrl = normalizeYouTube(url);
-
-  if (!isValidYouTubeVideo(cleanUrl)) {
-    return res.status(400).json({
-      error:
-        "Invalid YouTube video URL. Use formats like youtube.com/watch?v=ID, youtu.be/ID, or /shorts/ID"
+        res.json(JSON.parse(response.text));
+      } catch (geminiErr) {
+        console.error("Gemini processing error:", geminiErr);
+        if (!res.headersSent) {
+          res.status(500).json({
+            error: `Gemini processing failed: ${geminiErr.message}`,
+            details: geminiErr.stack
+          });
+        }
+      }
     });
+
+    child.on("error", (e) => {
+      console.error("Spawn error:", e);
+      if (!res.headersSent) res.status(500).json({ error: "Failed to start downloader." });
+    });
+
+  } catch (error) {
+    console.error("Transcription error:", error);
+    if (!res.headersSent) res.status(500).json({ error: error.message });
   }
-
-  const filename = safeFileName(title || "youtube_video", ".mp4");
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${filename}"`
-  );
-  res.setHeader("Content-Type", "video/mp4");
-
-  const args = [
-    "-f",
-    "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-    "--merge-output-format",
-    "mp4",
-    "--recode-video",
-    "mp4",
-    "--postprocessor-args",
-    "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
-    "-o",
-    "-",
-    cleanUrl
-  ];
-
-  /*const args = [
-  "--js-runtimes", "deno",
-  "-f", "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-  "--merge-output-format", "mp4",
-  "--recode-video", "mp4",
-  "--postprocessor-args", "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
-  "-o", "-",
-  cleanUrl
-];
-*/
-
-  const child = spawn(YTDLP_PATH, args);
-  child.stdout.pipe(res);
-  child.stderr.on("data", (d) =>
-    console.error("YT download:", d.toString())
-  );
-  child.on("error", (e) => {
-    console.error("YT spawn error:", e);
-    if (!res.headersSent) res.status(500).end();
-  });
-  child.on("close", (code) => {
-    if (code !== 0) console.error("YT close code:", code);
-    if (!res.headersSent) res.end();
-  });
 });
 
 // ---------- Start server ----------
@@ -532,8 +520,15 @@ app.use((req, res) => {
 });
 
 if (require.main === module) {
+  // Add Deno to PATH if it exists (for Render)
+  const denoPath = path.join(os.homedir(), ".deno", "bin");
+  if (fs.existsSync(denoPath)) {
+    process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
+    console.log("🦕 Deno added to PATH for yt-dlp");
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`✅ InstantSaver backend: http://localhost:${PORT}`);
+    console.log(`✅ Universal Downloader Backend: http://localhost:${PORT}`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
   });
 }
