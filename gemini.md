@@ -1,9 +1,9 @@
 # InstaTranscribe Project Context
 
 ## 1. Project Overview
-InstaTranscribe is a **Full-Stack** React application that downloads Instagram videos (Reels, Posts, Stories), extracts the audio, and uses Google Gemini to transcribe and translate the content. 
+InstaTranscribe is a **Full-Stack** React application that downloads videos from various social media platforms (Instagram, TikTok, YouTube, etc.), extracts the audio, and uses Google Gemini to transcribe and translate the content.
 
-Originally a client-side only app, it has evolved into a hybrid architecture to reliably bypass Instagram's anti-scraping measures using a dedicated backend.
+Originally focused on Instagram, the project is currently expanding to support multi-platform downloading (inspired by [Seal](https://github.com/JunkFood02/Seal)) using a robust `yt-dlp` integration.
 
 ## 2. Tech Stack & Environment
 - **Frontend:** React 19 (Vite), TypeScript, Tailwind CSS v3.
@@ -15,18 +15,19 @@ Originally a client-side only app, it has evolved into a hybrid architecture to 
 ## 3. Architecture & Data Flow
 
 ### A. The Hybrid Pipeline
-1.  **Input:** User provides an Instagram URL.
-2.  **Request:** Frontend sends URL to Backend (`/api/instagram`).
-3.  **Resolution (Backend):** 
+1.  **Input:** User provides a video URL (Instagram, TikTok, YouTube, etc.).
+2.  **Routing:**
+    *   **YouTube:** URL is sent *directly* to Gemini API (supported feature) to save bandwidth/time.
+    *   **Others (IG/TikTok):** URL is sent to Backend (`/api/download`).
+3.  **Resolution (Backend - Non-YouTube):** 
     *   Backend executes `yt-dlp` to resolve the video URL and metadata.
-    *   `yt-dlp` handles cookies, signatures, and anti-bot measures.
-4.  **Download (Backend):**
-    *   Backend streams the video data from Instagram's CDN.
+    *   `yt-dlp` handles cookies, signatures, and anti-bot measures for supported platforms.
+4.  **Download (Backend - Non-YouTube):**
+    *   Backend streams the video data from the platform's CDN.
     *   Pipes the stream to the Frontend response (avoiding CORS).
 5.  **Processing (Frontend):** 
-    *   Frontend receives the video `Blob`.
-    *   Converts `Blob` to `Base64`.
-    *   Sends to Google Gemini API for transcription/translation.
+    *   **YouTube:** Sends URL directly in prompt.
+    *   **Others:** Converts downloaded `Blob` to `Base64` and sends as `inlineData`.
 6.  **Output:** JSON response containing `originalText` and `translatedText`.
 
 ### B. Gemini Integration (`services/geminiService.ts`)
@@ -35,15 +36,20 @@ Originally a client-side only app, it has evolved into a hybrid architecture to 
 -   **Output:** Strict JSON Schema (`application/json`).
 
 ## 4. Video Resolution Strategy (`server/server.js`)
-The "Cobalt" and "Proxy" strategies have been replaced by a robust local backend.
+The backend uses a local `yt-dlp` binary to handle video resolution and downloading.
 
 ### Local Backend Strategy
--   **Endpoint:** `/api/instagram` (Proxied to `localhost:10000` in dev).
+-   **Endpoint:** `/api/instagram` (Legacy), migrating to `/api/download`.
 -   **Tool:** `yt-dlp` (Industry standard video downloader).
 -   **Mechanism:**
     1.  Checks if `yt-dlp` binary exists (downloads it on build if missing).
-    2.  Runs `yt-dlp --get-url` to find the direct video link.
-    3.  Proxies the download to the client to bypass CORS.
+    2.  Runs `yt-dlp --get-url` (or specific flags per platform) to find the direct video link.
+    3.  Proxies the download to the client.
+
+### C. Cookie Management
+-   **Requirement:** `yt-dlp` requires cookies in **Netscape** format to bypass bot detection on platforms like Instagram and YouTube.
+-   **Current State:** Cookies are often provided in JSON format (e.g., from browser extensions).
+-   **Solution:** The backend includes a conversion utility to automatically transform JSON cookies into the Netscape format required by `yt-dlp` at runtime. This ensures flexibility when updating session cookies.
 
 ## 5. Deployment (Render)
 The application is deployed as a single "Web Service" on Render.
@@ -58,7 +64,7 @@ The application is deployed as a single "Web Service" on Render.
     -   Server hosts Frontend static files at `/`.
 
 ## 6. Key Features
--   **Instagram Downloader:** Reliable downloading via `yt-dlp` backend.
+-   **Multi-Platform Downloader:** Reliable downloading via `yt-dlp` backend (expanding beyond Instagram).
 -   **AI Transcription:** Fast, multimodal transcription using Gemini Flash 2.5.
 -   **Share/Keep Integration:** "Share" button using `navigator.share` API for mobile integration with Google Keep/Notes.
 -   **Dark Mode:** System-preference aware Tailwind dark mode.
@@ -77,6 +83,7 @@ The application is deployed as a single "Web Service" on Render.
 
 ## 8. Development Configuration
 - **Git User:** `wesscheid <34629619+wesscheid@users.noreply.github.com>`
+- **Active Branch:** `feature/multi-platform` (Working on Seal-like integration).
 - **Deployment:** 
     - **Render:** Branch `render` (or `main` configured for Render).
     - **Vercel:** Branch `vercel`.
