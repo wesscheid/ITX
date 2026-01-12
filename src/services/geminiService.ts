@@ -13,11 +13,12 @@ export const translateVideo = async (
   try {
     const prompt = `
       Analyze this media file (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage}.
+      1. Create a short, descriptive title for the content (max 10 words).
+      2. Transcribe the spoken audio verbatim in its original language.
+      3. Translate the transcription into ${targetLanguage}.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
+      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
     const response = await ai.models.generateContent({
@@ -40,10 +41,11 @@ export const translateVideo = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            title: { type: Type.STRING },
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText"],
+          required: ["title", "originalText", "translatedText"],
         },
       },
     });
@@ -55,6 +57,7 @@ export const translateVideo = async (
     const result = JSON.parse(response.text);
 
     return {
+      title: result.title,
       originalText: result.originalText,
       translatedText: result.translatedText,
       language: targetLanguage,
@@ -76,11 +79,12 @@ export const translateVideoStream = async (
   try {
     const prompt = `
       Analyze this media file (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage}.
+      1. Create a short, descriptive title for the content (max 10 words).
+      2. Transcribe the spoken audio verbatim in its original language.
+      3. Translate the transcription into ${targetLanguage}.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
+      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
     // Use fileData instead of inlineData for better memory management
@@ -104,10 +108,11 @@ export const translateVideoStream = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            title: { type: Type.STRING },
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText"],
+          required: ["title", "originalText", "translatedText"],
         },
       },
     });
@@ -119,6 +124,7 @@ export const translateVideoStream = async (
     const result = JSON.parse(response.text);
 
     return {
+      title: result.title,
       originalText: result.originalText,
       translatedText: result.translatedText,
       language: targetLanguage,
