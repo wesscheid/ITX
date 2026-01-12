@@ -382,11 +382,12 @@ app.post("/api/transcribe", async (req, res) => {
   try {
     const prompt = `
       Analyze this media file (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage || 'English'}.
+      1. Create a short, descriptive title for the content (max 10 words).
+      2. Transcribe the spoken audio verbatim in its original language.
+      3. Translate the transcription into ${targetLanguage || 'English'}.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
+      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
@@ -456,10 +457,11 @@ app.post("/api/transcribe", async (req, res) => {
               responseSchema: {
                 type: Type.OBJECT,
                 properties: {
+                  title: { type: Type.STRING },
                   originalText: { type: Type.STRING },
                   translatedText: { type: Type.STRING },
                 },
-                required: ["originalText", "translatedText"],
+                required: ["title", "originalText", "translatedText"],
               },
             }
           });
