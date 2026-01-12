@@ -12,7 +12,9 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Initialize Gemini
-const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
+const genAI = new GoogleGenAI({ 
+  apiKey: process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY 
+});
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -437,22 +439,9 @@ app.post("/api/transcribe", async (req, res) => {
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
         let response;
         try {
-          response = await genAI.models.generateContent({
-            model: "gemini-2.5-flash", // Updated for 2026 compatibility
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    data: buffer.toString("base64"),
-                    mimeType: "audio/mp4"
-                  }
-                },
-                {
-                  text: prompt
-                }
-              ]
-            },
-            config: {
+          const model = genAI.getGenerativeModel({ 
+            model: "gemini-2.5-flash",
+            generationConfig: {
               responseMimeType: "application/json",
               responseSchema: {
                 type: Type.OBJECT,
@@ -465,6 +454,25 @@ app.post("/api/transcribe", async (req, res) => {
               },
             }
           });
+
+          const result = await model.generateContent({
+            contents: [
+              {
+                parts: [
+                  {
+                    inlineData: {
+                      data: buffer.toString("base64"),
+                      mimeType: "audio/mp4"
+                    }
+                  },
+                  {
+                    text: prompt
+                  }
+                ]
+              }
+            ]
+          });
+          response = result.response;
         } catch (initialErr) {
           if (initialErr.message?.includes('not found')) {
             console.error("Primary model not found, attempting to list models...");
@@ -479,17 +487,25 @@ app.post("/api/transcribe", async (req, res) => {
         }
         
         // Log basic info about the response
-        console.log("Gemini response received. Candidates:", response.candidates?.length);
+        console.log("Gemini response received.");
         
-        if (!response.text) {
-          console.error("Gemini API Empty Response Object:", JSON.stringify(response));
-          // Check for safety ratings if text is missing
-          const safetyRatings = response.candidates?.[0]?.safetyRatings;
-          const finishReason = response.candidates?.[0]?.finishReason;
-          throw new Error(`Gemini returned an empty response. Finish Reason: ${finishReason || 'UNKNOWN'}. Safety: ${JSON.stringify(safetyRatings || [])}`);
+        const rawText = response.text();
+        if (!rawText) {
+          throw new Error(`Gemini returned an empty response text.`);
         }
 
-        res.json(JSON.parse(response.text));
+        try {
+          const parsed = JSON.parse(rawText);
+          res.json(parsed);
+        } catch (parseErr) {
+          console.error("Failed to parse Gemini response as JSON:", rawText);
+          // Fallback: if it's not JSON but has text, try to return it anyway
+          res.json({
+            title: "Transcription",
+            originalText: rawText,
+            translatedText: rawText
+          });
+        }
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
         if (!res.headersSent) {
