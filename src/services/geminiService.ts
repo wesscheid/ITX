@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProcessingResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
 
 export const translateVideo = async (
   base64Data: string,
@@ -21,9 +22,24 @@ export const translateVideo = async (
       If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
-    const response = await ai.models.generateContent({
+    const model = ai.getGenerativeModel({ 
       model: modelId,
-      contents: {
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["title", "originalText", "translatedText"],
+        },
+      }
+    });
+
+    const result = await model.generateContent({
+      contents: [{
         parts: [
           {
             inlineData: {
@@ -35,31 +51,20 @@ export const translateVideo = async (
             text: prompt,
           },
         ],
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      },
+      }]
     });
 
-    if (!response.text) {
+    const responseText = result.response.text();
+    if (!responseText) {
       throw new Error("No response text generated");
     }
 
-    const result = JSON.parse(response.text);
+    const jsonResult = JSON.parse(responseText);
 
     return {
-      title: result.title,
-      originalText: result.originalText,
-      translatedText: result.translatedText,
+      title: jsonResult.title,
+      originalText: jsonResult.originalText,
+      translatedText: jsonResult.translatedText,
       language: targetLanguage,
     };
   } catch (error) {
@@ -87,10 +92,24 @@ export const translateVideoStream = async (
       If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
-    // Use fileData instead of inlineData for better memory management
-    const response = await ai.models.generateContent({
+    const model = ai.getGenerativeModel({ 
       model: modelId,
-      contents: {
+      generationConfig: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["title", "originalText", "translatedText"],
+        },
+      }
+    });
+
+    const result = await model.generateContent({
+      contents: [{
         parts: [
           {
             fileData: {
@@ -102,31 +121,20 @@ export const translateVideoStream = async (
             text: prompt,
           },
         ],
-      },
-      config: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      },
+      }]
     });
 
-    if (!response.text) {
+    const responseText = result.response.text();
+    if (!responseText) {
       throw new Error("No response text generated");
     }
 
-    const result = JSON.parse(response.text);
+    const jsonResult = JSON.parse(responseText);
 
     return {
-      title: result.title,
-      originalText: result.originalText,
-      translatedText: result.translatedText,
+      title: jsonResult.title,
+      originalText: jsonResult.originalText,
+      translatedText: jsonResult.translatedText,
       language: targetLanguage,
     };
   } catch (error) {
