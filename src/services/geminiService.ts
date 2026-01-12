@@ -1,8 +1,7 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProcessingResult } from "../types";
 
-const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY || "";
-const ai = new GoogleGenAI({ apiKey });
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 export const translateVideo = async (
   base64Data: string,
@@ -14,32 +13,16 @@ export const translateVideo = async (
   try {
     const prompt = `
       Analyze this media file (Audio or Video).
-      1. Create a short, descriptive title for the content (max 10 words).
-      2. Transcribe the spoken audio verbatim in its original language.
-      3. Translate the transcription into ${targetLanguage}.
+      1. Transcribe the spoken audio verbatim in its original language.
+      2. Translate the transcription into ${targetLanguage}.
       
-      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
-      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
+      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
-    const model = ai.getGenerativeModel({ 
+    const response = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      }
-    });
-
-    const result = await model.generateContent({
-      contents: [{
+      contents: {
         parts: [
           {
             inlineData: {
@@ -51,20 +34,29 @@ export const translateVideo = async (
             text: prompt,
           },
         ],
-      }]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["originalText", "translatedText"],
+        },
+      },
     });
 
-    const responseText = result.response.text();
-    if (!responseText) {
+    if (!response.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(responseText);
+    const result = JSON.parse(response.text);
 
     return {
-      title: jsonResult.title,
-      originalText: jsonResult.originalText,
-      translatedText: jsonResult.translatedText,
+      originalText: result.originalText,
+      translatedText: result.translatedText,
       language: targetLanguage,
     };
   } catch (error) {
@@ -84,32 +76,17 @@ export const translateVideoStream = async (
   try {
     const prompt = `
       Analyze this media file (Audio or Video).
-      1. Create a short, descriptive title for the content (max 10 words).
-      2. Transcribe the spoken audio verbatim in its original language.
-      3. Translate the transcription into ${targetLanguage}.
+      1. Transcribe the spoken audio verbatim in its original language.
+      2. Translate the transcription into ${targetLanguage}.
       
-      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
-      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
+      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
-    const model = ai.getGenerativeModel({ 
+    // Use fileData instead of inlineData for better memory management
+    const response = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      }
-    });
-
-    const result = await model.generateContent({
-      contents: [{
+      contents: {
         parts: [
           {
             fileData: {
@@ -121,52 +98,33 @@ export const translateVideoStream = async (
             text: prompt,
           },
         ],
-      }]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["originalText", "translatedText"],
+        },
+      },
     });
 
-    const responseText = result.response.text();
-    if (!responseText) {
+    if (!response.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(responseText);
+    const result = JSON.parse(response.text);
 
     return {
-      title: jsonResult.title,
-      originalText: jsonResult.originalText,
-      translatedText: jsonResult.translatedText,
+      originalText: result.originalText,
+      translatedText: result.translatedText,
       language: targetLanguage,
     };
   } catch (error) {
     console.error("Gemini API Error:", error);
     throw error;
   }
-};
-
-/**
- * NEW: Calls the backend to handle the full byte-transfer pipeline.
- * This is much more efficient than downloading to the browser first.
- */
-export const transcribeUrl = async (
-  url: string,
-  targetLanguage: string
-): Promise<ProcessingResult> => {
-  const response = await fetch('/api/transcribe', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ url, targetLanguage }),
-  });
-
-  if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to transcribe video');
-  }
-
-  const result = await response.json();
-  return {
-    ...result,
-    language: targetLanguage
-  };
 };

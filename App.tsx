@@ -7,8 +7,8 @@ const ProcessingState = lazy(() => import('./components/ProcessingState'));
 const ResultCard = lazy(() => import('./components/ResultCard'));
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult } from './types';
 import { fileToBase64 } from './utils/fileHelpers';
-import { translateVideo, transcribeUrl } from './services/geminiService';
-import { fetchVideoFromUrl } from './src/services/videoDownloaderService';
+import { translateVideo } from './services/geminiService';
+import { fetchVideoFromUrl } from './services/videoDownloaderService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -64,16 +64,17 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setStatus(AppStatus.PROCESSING); // Skip straight to processing
+    setStatus(AppStatus.DOWNLOADING);
 
     try {
-      const data = await transcribeUrl(url, selectedLanguage);
-      setResult(data);
-      setStatus(AppStatus.SUCCESS);
+      const blob = await fetchVideoFromUrl(url, (status) => console.log(status));
+      // Convert Blob to File to satisfy TypeScript and downstream logic
+      const file = new File([blob], "downloaded_video.mp4", { type: blob.type || 'video/mp4' });
+      await processFile(file);
     } catch (error: any) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg(error.message || "Failed to process video from URL.");
+      setErrorMsg(error.message || "Failed to download video from URL.");
     }
   };
 
@@ -94,7 +95,7 @@ const App: React.FC = () => {
 
     if (isManualDownloadNeeded) {
       displayErrorTitle = "Automatic Download Blocked";
-      displayErrorText = "The browser or platform blocked the automated download.";
+      displayErrorText = "The browser blocked the automated download. This is common with Instagram links.";
     } else if (isResolverError) {
       displayErrorTitle = "Connection Failed";
       displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
@@ -196,7 +197,7 @@ const App: React.FC = () => {
                       Click to Download Audio
                     </a>
                     <p className="mt-3 text-xs text-slate-500 dark:text-slate-500">
-                      Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file.
+                      Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file "extracted_audio.mp3".
                     </p>
                   </div>
                 )}
@@ -211,8 +212,8 @@ const App: React.FC = () => {
                       Since your network is blocking our resolver, please use a third-party website to download the file first.
                     </p>
                     <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 mb-3">
-                      <li>Go to a downloader site for your specific platform (e.g. SnapInsta for IG, SaveFrom for YouTube).</li>
-                      <li>Paste your link there and download the video/audio.</li>
+                      <li>Go to a site like <strong>SnapInsta</strong> or <strong>SaveIG</strong>.</li>
+                      <li>Paste your Instagram link there and download the video/audio.</li>
                       <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
                     </ol>
                   </div>

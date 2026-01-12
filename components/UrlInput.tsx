@@ -18,13 +18,13 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl p-4 sm:p-8 border border-slate-300 dark:border-slate-600">
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <label htmlFor="video-url" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
-          Paste Video Link (Instagram, YouTube, TikTok, etc.)
+        <label htmlFor="insta-url" className="block text-sm font-medium text-slate-700 dark:text-slate-300">
+          Paste Instagram Link (Reel, Post, or Story)
         </label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="url"
-            id="video-url"
+            id="insta-url"
             required
             placeholder="https://www.instagram.com/reel/..."
             value={url}
@@ -44,7 +44,7 @@ const UrlInput: React.FC<UrlInputProps> = ({ onUrlSubmit, disabled }) => {
           </button>
         </div>
         <p className="text-xs text-slate-500 dark:text-slate-400">
-          Works with public videos from most major platforms. If this fails, use the "Upload File" tab.
+          Works with public Instagram Reels and Posts. If this fails, use the "Upload File" tab.
         </p>
       </form>
     </div>

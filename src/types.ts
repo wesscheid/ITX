@@ -7,7 +7,6 @@ export enum AppStatus {
 }
 
 export interface ProcessingResult {
-  title: string;
   originalText: string;
   translatedText: string;
   language: string;
