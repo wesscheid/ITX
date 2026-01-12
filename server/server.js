@@ -77,14 +77,22 @@ function getCookiesPath() {
   }
 
   if (!rawCookies) {
-    const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
-    const rootCookiesEnv = path.join(__dirname, "../cookies.env");
-    if (fs.existsSync(rootCookiesTxt)) {
-      console.log("✅ Using root cookies.txt");
-      rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
-    } else if (fs.existsSync(rootCookiesEnv)) {
-      console.log("✅ Using root cookies.env");
-      rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
+    const commonPaths = [
+      "../cookies.txt",
+      "../cookies_ig.txt",
+      "../cookies_yt.txt",
+      "../cookies.env",
+      "cookies.txt",
+      "cookies_ig.txt"
+    ];
+    
+    for (const p of commonPaths) {
+      const fullPath = path.resolve(__dirname, p);
+      if (fs.existsSync(fullPath)) {
+        console.log(`✅ Using cookies from ${p}`);
+        rawCookies = fs.readFileSync(fullPath, "utf8");
+        break;
+      }
     }
   }
 
@@ -537,17 +545,22 @@ app.use((req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-if (require.main === module) {
-  // Add Deno to PATH if it exists (for Render)
-  const denoPath = path.join(os.homedir(), ".deno", "bin");
-  if (fs.existsSync(denoPath)) {
-    process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
-    console.log("🦕 Deno added to PATH for yt-dlp");
-  }
+// ---------- PATH CONFIGURATION ----------
+const BIN_DIR = path.join(__dirname, "bin");
+process.env.PATH = `${BIN_DIR}${path.delimiter}${process.env.PATH}`;
 
+// Add Deno to PATH if it exists (for Render)
+const denoPath = path.join(os.homedir(), ".deno", "bin");
+if (fs.existsSync(denoPath)) {
+  process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
+  console.log("🦕 Deno added to PATH");
+}
+
+if (require.main === module) {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Universal Downloader Backend: http://localhost:${PORT}`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
+    console.log(`📂 Binaries: ${BIN_DIR}`);
   });
 }
 
