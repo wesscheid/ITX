@@ -384,15 +384,16 @@ app.post("/api/transcribe", async (req, res) => {
       Analyze this media file (Audio or Video).
       1. Transcribe the spoken audio verbatim in its original language.
       2. Translate the transcription into ${targetLanguage || 'English'}.
+      3. Generate a short, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
       If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath();
-    const args = [
+    const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba/bestaudio/best",
       "--no-playlist",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -400,9 +401,10 @@ app.post("/api/transcribe", async (req, res) => {
       url
     ];
 
-    if (cookiePath) args.unshift("--cookies", cookiePath);
+    if (cookiePath) ytDlpArgs.unshift("--cookies", cookiePath);
 
-    const child = spawn(YTDLP_PATH, args);
+    console.log(`Executing yt-dlp command: "${YTDLP_PATH}" ${ytDlpArgs.join(" ")}`);
+    const child = spawn(YTDLP_PATH, ytDlpArgs);
     let chunks = [];
     let stderrData = "";
     let totalLength = 0;
@@ -432,8 +434,16 @@ app.post("/api/transcribe", async (req, res) => {
             details: stderrData || `yt-dlp exited with code ${code}`
           });
         }
+        if (code !== 0) {
+          console.error(`yt-dlp exited with non-zero code ${code}`);
+          console.error("yt-dlp stderr:", stderrData);
+          return res.status(500).json({
+            error: `yt-dlp failed with exit code ${code}.`,
+            details: stderrData
+          });
+        }
 
-        console.log(`Sending ${buffer.length} bytes to Gemini...`);
+        console.log(`Sending ${buffer.length} bytes to Gemini with prompt: "${prompt}"`);
         let response;
         try {
           response = await genAI.models.generateContent({
@@ -458,12 +468,14 @@ app.post("/api/transcribe", async (req, res) => {
                 properties: {
                   originalText: { type: Type.STRING },
                   translatedText: { type: Type.STRING },
+                  title: { type: Type.STRING },
                 },
-                required: ["originalText", "translatedText"],
+                required: ["originalText", "translatedText", "title"],
               },
             }
           });
         } catch (initialErr) {
+          console.error("Gemini API call failed:", initialErr);
           if (initialErr.message?.includes('not found')) {
             console.error("Primary model not found, attempting to list models...");
             try {
@@ -480,7 +492,7 @@ app.post("/api/transcribe", async (req, res) => {
         console.log("Gemini response received. Candidates:", response.candidates?.length);
         
         if (!response.text) {
-          console.error("Gemini API Empty Response Object:", JSON.stringify(response));
+          console.error("Gemini API Empty Response Object:", JSON.stringify(response, null, 2));
           // Check for safety ratings if text is missing
           const safetyRatings = response.candidates?.[0]?.safetyRatings;
           const finishReason = response.candidates?.[0]?.finishReason;

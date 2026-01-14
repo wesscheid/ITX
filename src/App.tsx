@@ -65,7 +65,10 @@ const App: React.FC = () => {
       const blob = chunksToBlob(chunks, file.type);
       const data = await translateVideoStream(blob, file.type, selectedLanguage);
       
-      setResult(data);
+      setResult({
+        ...data,
+        sourceUrl: `File: ${file.name}`
+      });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error) {
@@ -89,7 +92,10 @@ const App: React.FC = () => {
       // Direct Byte Transfer: No browser download needed!
       const data = await transcribeUrl(url, selectedLanguage);
       
-      setResult(data);
+      setResult({
+        ...data,
+        sourceUrl: url
+      });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error: any) {
@@ -252,6 +258,7 @@ const App: React.FC = () => {
         
         <footer className="text-center text-slate-400 dark:text-slate-500 text-sm">
           <p>Powered by Gemini</p>
+          <p className="text-xs mt-1 opacity-75">v{process.env.APP_VERSION}</p>
         </footer>
       </div>
     </div>

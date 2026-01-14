@@ -25,5 +25,11 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    ".vercel",
+    "_backup_root_components"
+  ]
 }

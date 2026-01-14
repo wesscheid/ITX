@@ -17,6 +17,9 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
     }
   }, []);
 
+  // Determine if a translation actually occurred
+  const translationOccurred = result.language !== 'English' || result.originalText !== result.translatedText;
+
   const handleDownload = () => {
     const content = `Original Transcription:\n\n${result.originalText}\n\n-------------------\n\nTranslation (${result.language}):\n\n${result.translatedText}`;
     downloadTextFile(content, `transcript_${result.language}.txt`);
@@ -112,27 +115,43 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
         </div>
       </div>
 
-      <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100 dark:divide-slate-700">
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Original Audio</h3>
+      {translationOccurred ? (
+        <div className="grid md:grid-cols-2 divide-y md:divide-y-0 md:divide-x divide-slate-100 dark:divide-slate-700">
+          {/* Original Audio Section */}
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Original Audio</h3>
+            </div>
+            <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
+                {result.originalText}
+            </div>
           </div>
-          <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
-            {result.originalText}
+
+          {/* Translation Section */}
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-purple-500 dark:text-purple-400 uppercase tracking-wider">
+                 Translation ({result.language})
+              </h3>
+            </div>
+            <div className="bg-purple-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-purple-100 dark:border-slate-800 text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
+                {result.translatedText}
+            </div>
           </div>
         </div>
-
-        <div className="p-6">
+      ) : (
+        // Only show one column for Transcription if no effective translation occurred
+        <div className="p-6 col-span-full">
           <div className="flex items-center justify-between mb-3">
             <h3 className="text-sm font-bold text-purple-500 dark:text-purple-400 uppercase tracking-wider">
-               Translation ({result.language})
+               Transcription ({result.language})
             </h3>
           </div>
           <div className="bg-purple-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-purple-100 dark:border-slate-800 text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
-            {result.translatedText}
+              {result.translatedText}
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };
