@@ -20,7 +20,7 @@ export const createFileStream = (file: File): ReadableStream => {
 // New: Chunked file processing for large files
 export const processFileInChunks = async (
   file: File,
-  chunkSize: number = 5 * 1024 * 1024, // 5MB chunks
+  _chunkSize: number = 5 * 1024 * 1024, // 5MB chunks (kept for signature compatibility if needed, but unused)
   onProgress?: (progress: number) => void
 ): Promise<Uint8Array[]> => {
   const chunks: Uint8Array[] = [];

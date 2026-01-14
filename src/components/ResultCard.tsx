@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ProcessingResult } from '../types';
+import type { ProcessingResult } from '../types';
 import { downloadTextFile } from '../utils/fileHelpers';
 
 interface ResultCardProps {

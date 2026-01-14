@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type } from "@google/genai";
-import { ProcessingResult } from "../types";
+import type { ProcessingResult } from "../types";
 
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
@@ -137,11 +137,12 @@ export const translateVideoStream = async (
 
 /**
  * NEW: Calls the backend to handle the full byte-transfer pipeline.
- * This is much more efficient than downloading to the browser first.
+ * Uses NDJSON streaming to provide real-time progress updates.
  */
 export const transcribeUrl = async (
   url: string,
-  targetLanguage: string
+  targetLanguage: string,
+  onProgress?: (progress: number, message: string) => void
 ): Promise<ProcessingResult> => {
   const response = await fetch('/api/transcribe', {
     method: 'POST',
@@ -152,13 +153,77 @@ export const transcribeUrl = async (
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to transcribe video');
+    // Try to parse error json if possible
+    try {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to transcribe video');
+    } catch (e) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
   }
 
-  const result = await response.json();
-  return {
-    ...result,
-    language: targetLanguage
-  };
+  if (!response.body) {
+    throw new Error('No response body received');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: ProcessingResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    
+    // Process full lines
+    const lines = buffer.split('\n');
+    // Keep the last partial line in the buffer
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      try {
+        const msg = JSON.parse(line);
+        
+        switch (msg.type) {
+          case 'progress':
+            if (onProgress) {
+              onProgress(msg.value, 'Downloading media...');
+            }
+            break;
+            
+          case 'status':
+            if (onProgress) {
+              onProgress(100, msg.message); // Usually "Processing with Gemini..."
+            }
+            break;
+            
+          case 'result':
+            finalResult = {
+              ...msg.data,
+              language: targetLanguage
+            };
+            break;
+            
+          case 'error':
+            throw new Error(msg.data?.message || 'Unknown server error');
+        }
+      } catch (e) {
+        console.warn('Failed to parse stream message:', line, e);
+        // If it was our own error throw, rethrow it
+        if ((e as Error).message !== 'Unexpected token' && (e as Error).message !== 'Unexpected end of JSON input') {
+             throw e;
+        }
+      }
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error('Stream ended without a result');
+  }
+
+  return finalResult;
 };

@@ -17,13 +17,15 @@
   "dependencies": {
     "@google/genai": "^1.33.0",
     "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
     "express": "^5.2.1",
     "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "dotenv": "^16.4.5"
+    "react-dom": "^19.2.3"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "@types/react": "^19.2.8",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.0.0",
     "autoprefixer": "^10.4.23",
     "concurrently": "^9.2.1",

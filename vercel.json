@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/bin/**",
+      "includeFiles": "server/bin/**, cookies*.txt, cookie_*.txt",
       "maxDuration": 60
     }
   },

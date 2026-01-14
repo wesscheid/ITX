@@ -4,10 +4,10 @@ import FileUpload from './components/FileUpload';
 import UrlInput from './components/UrlInput';
 import ProcessingState from './components/ProcessingState';
 import ResultCard from './components/ResultCard';
-import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
-import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
-import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
-import { fetchVideoFromUrl } from './services/videoDownloaderService';
+import { SUPPORTED_LANGUAGES, AppStatus } from './types';
+import type { ProcessingResult, ProcessingProgress } from './types';
+import { validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
+import { translateVideoStream, transcribeUrl } from './services/geminiService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
@@ -85,12 +85,23 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setProgress({ stage: 'processing', percentage: 0, message: 'Processing with Gemini (Byte-Transfer)...' });
-    setStatus(AppStatus.PROCESSING);
+    setProgress({ stage: 'downloading', percentage: 0, message: 'Starting...' });
+    setStatus(AppStatus.DOWNLOADING); // Explicitly set DOWNLOADING stage
 
     try {
       // Direct Byte Transfer: No browser download needed!
-      const data = await transcribeUrl(url, selectedLanguage);
+      const data = await transcribeUrl(url, selectedLanguage, (progressVal, message) => {
+        setProgress(_ => ({
+          stage: progressVal === 100 ? 'processing' : 'downloading',
+          percentage: progressVal,
+          message: message
+        }));
+        
+        // Switch to PROCESSING status if download is complete (implicit logic)
+        if (progressVal === 100) {
+           setStatus(AppStatus.PROCESSING);
+        }
+      });
       
       setResult({
         ...data,

@@ -1,10 +1,12 @@
-export enum AppStatus {
-  IDLE = 'IDLE',
-  DOWNLOADING = 'DOWNLOADING',
-  PROCESSING = 'PROCESSING',
-  SUCCESS = 'SUCCESS',
-  ERROR = 'ERROR'
-}
+export const AppStatus = {
+  IDLE: 'IDLE',
+  DOWNLOADING: 'DOWNLOADING',
+  PROCESSING: 'PROCESSING',
+  SUCCESS: 'SUCCESS',
+  ERROR: 'ERROR'
+} as const;
+
+export type AppStatus = typeof AppStatus[keyof typeof AppStatus];
 
 export interface ProcessingResult {
   originalText: string;

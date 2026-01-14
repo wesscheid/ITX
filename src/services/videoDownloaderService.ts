@@ -1,4 +1,3 @@
-import { AppStatus } from '../types';
 
 const LOCAL_API_BASE = '';
 
@@ -6,9 +5,12 @@ const LOCAL_API_BASE = '';
  * Custom Error class for downloader issues
  */
 export class DownloaderError extends Error {
-  constructor(message: string, public code: string = 'UNKNOWN_ERROR') {
+  public code: string;
+
+  constructor(message: string, code: string = 'UNKNOWN_ERROR') {
     super(message);
     this.name = 'DownloaderError';
+    this.code = code;
   }
 }
 

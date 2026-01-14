@@ -22,3 +22,7 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Cookies
+cookie_*.txt
+cookies_*.txt

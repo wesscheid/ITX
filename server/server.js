@@ -55,34 +55,80 @@ function safeFileName(base, ext) {
 }
 
 // ---------- Cookies Helper ----------
-function getCookiesPath() {
+function getCookiesPath(targetUrl) {
   let rawCookies = null;
-  const secretPath = "/etc/secrets/cookies.txt";
-
-  // 1. Check locations for cookies
-  if (fs.existsSync(secretPath)) {
-    console.log("✅ Found Render Secret File");
-    try {
-      rawCookies = fs.readFileSync(secretPath, "utf8");
-    } catch (e) {
-      console.error("Error reading secret file:", e);
+  const secretPath = "/etc/secrets/cookies.txt"; // Generic render secret
+  
+  // Domain-specific checks
+  if (targetUrl) {
+    const lowerUrl = targetUrl.toLowerCase();
+    
+    // X / Twitter
+    if (lowerUrl.includes("x.com") || lowerUrl.includes("twitter.com")) {
+      const xPath = path.join(__dirname, "../cookie_x.txt");
+      if (fs.existsSync(xPath)) {
+        console.log("✅ Found specific cookie file: cookie_x.txt");
+        rawCookies = fs.readFileSync(xPath, "utf8");
+      } else if (process.env.TWITTER_COOKIES) {
+        console.log("✅ Using TWITTER_COOKIES env var");
+        rawCookies = process.env.TWITTER_COOKIES;
+      }
+    }
+    
+    // Instagram
+    else if (lowerUrl.includes("instagram.com")) {
+      const igPath = path.join(__dirname, "../cookies_instagram.txt");
+      if (fs.existsSync(igPath)) {
+        console.log("✅ Found specific cookie file: cookies_instagram.txt");
+        rawCookies = fs.readFileSync(igPath, "utf8");
+      } else if (process.env.IG_COOKIES) {
+        console.log("✅ Using IG_COOKIES env var");
+        rawCookies = process.env.IG_COOKIES;
+      }
+    }
+    
+    // YouTube
+    else if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) {
+      const ytPath = path.join(__dirname, "../cookies_youtube.txt");
+      if (fs.existsSync(ytPath)) {
+        console.log("✅ Found specific cookie file: cookies_youtube.txt");
+        rawCookies = fs.readFileSync(ytPath, "utf8");
+      } else if (process.env.YOUTUBE_COOKIES) {
+        console.log("✅ Using YOUTUBE_COOKIES env var");
+        rawCookies = process.env.YOUTUBE_COOKIES;
+      }
     }
   }
 
-  if (!rawCookies && process.env.IG_COOKIES) {
-    console.log("✅ Using IG_COOKIES env var");
-    rawCookies = process.env.IG_COOKIES;
-  }
-
+  // Fallbacks if no specific cookie found yet
   if (!rawCookies) {
-    const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
-    const rootCookiesEnv = path.join(__dirname, "../cookies.env");
-    if (fs.existsSync(rootCookiesTxt)) {
-      console.log("✅ Using root cookies.txt");
-      rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
-    } else if (fs.existsSync(rootCookiesEnv)) {
-      console.log("✅ Using root cookies.env");
-      rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
+    // 1. Check Generic Render Secret
+    if (fs.existsSync(secretPath)) {
+      console.log("✅ Found Render Secret File (Generic)");
+      try {
+        rawCookies = fs.readFileSync(secretPath, "utf8");
+      } catch (e) {
+        console.error("Error reading secret file:", e);
+      }
+    }
+
+    // 2. Generic IG_COOKIES env (legacy fallback)
+    if (!rawCookies && process.env.IG_COOKIES) {
+      // console.log("✅ Using IG_COOKIES env var (Fallback)");
+      rawCookies = process.env.IG_COOKIES;
+    }
+
+    // 3. Generic cookies.txt/.env in root
+    if (!rawCookies) {
+      const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
+      const rootCookiesEnv = path.join(__dirname, "../cookies.env");
+      if (fs.existsSync(rootCookiesTxt)) {
+        console.log("✅ Using root cookies.txt");
+        rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
+      } else if (fs.existsSync(rootCookiesEnv)) {
+        console.log("✅ Using root cookies.env");
+        rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
+      }
     }
   }
 
@@ -93,7 +139,7 @@ function getCookiesPath() {
 
     // A. Check if already in Netscape format
     if (trimmed.startsWith("# Netscape") || trimmed.includes("\tTRUE\t")) {
-      const tempPath = path.join(os.tmpdir(), "cookies.txt");
+      const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
       // Ensure header exists
       const content = trimmed.startsWith("# Netscape") 
         ? trimmed 
@@ -167,7 +213,7 @@ function getCookiesPath() {
           });
 
           const finalCookies = "# Netscape HTTP Cookie File\n" + netscapeLines.join("\n") + "\n";
-          const tempPath = path.join(os.tmpdir(), "cookies.txt");
+          const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
           fs.writeFileSync(tempPath, finalCookies);
           console.log(`✅ Successfully converted ${allCookies.length} JSON cookies to Netscape format`);
           return tempPath;
@@ -209,7 +255,7 @@ function getCookiesPath() {
 
     const header = "# Netscape HTTP Cookie File";
     const cleanCookies = header + "\n" + finalLines.join("\n") + "\n";
-    const tempPath = path.join(os.tmpdir(), "cookies.txt");
+    const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
     fs.writeFileSync(tempPath, cleanCookies);
 
     return tempPath;
@@ -244,7 +290,7 @@ app.get("/api/resolve", (req, res) => {
     return res.json(cached.data);
   }
 
-  const cookiePath = getCookiesPath();
+  const cookiePath = getCookiesPath(cleanUrl);
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
   // 1. Try to get direct URL first (faster for some sites)
@@ -331,7 +377,7 @@ app.get("/api/download", (req, res) => {
   );
   res.setHeader("Content-Type", "video/mp4");
 
-  const cookiePath = getCookiesPath();
+  const cookiePath = getCookiesPath(url);
   const args = [
     "--user-agent",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -374,10 +420,14 @@ app.get("/api/download", (req, res) => {
   });
 });
 
-// ---------- TRANSCRIBE & TRANSLATE (Direct Byte Transfer) ----------
+// ---------- TRANSCRIBE & TRANSLATE (Streaming Progress) ----------
 app.post("/api/transcribe", async (req, res) => {
   const { url, targetLanguage } = req.body;
   if (!url) return res.status(400).json({ error: "Missing URL" });
+
+  // Set headers for streaming response (NDJSON)
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Transfer-Encoding', 'chunked');
 
   try {
     const prompt = `
@@ -392,10 +442,11 @@ app.post("/api/transcribe", async (req, res) => {
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
-    const cookiePath = getCookiesPath();
+    const cookiePath = getCookiesPath(url);
     const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba/bestaudio/best",
       "--no-playlist",
+      "--js-runtimes", "node",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
       "-o", "-",
       url
@@ -409,8 +460,17 @@ app.post("/api/transcribe", async (req, res) => {
     let stderrData = "";
     let totalLength = 0;
     
+    // Parse progress from stderr
     child.stderr.on("data", (data) => {
-      stderrData += data.toString();
+      const text = data.toString();
+      stderrData += text;
+      
+      // Extract percentage: [download]  23.5% of ...
+      const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
+      if (match && match[1]) {
+        const percent = parseFloat(match[1]);
+        res.write(JSON.stringify({ type: 'progress', value: percent, stage: 'downloading' }) + '\n');
+      }
     });
 
     child.stdout.on("data", (chunk) => {
@@ -428,26 +488,19 @@ app.post("/api/transcribe", async (req, res) => {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
-          console.error("yt-dlp stderr:", stderrData);
-          return res.status(500).json({
-            error: `Failed to fetch media bytes (empty buffer).`,
-            details: stderrData || `yt-dlp exited with code ${code}`
-          });
-        }
-        if (code !== 0) {
-          console.error(`yt-dlp exited with non-zero code ${code}`);
-          console.error("yt-dlp stderr:", stderrData);
-          return res.status(500).json({
-            error: `yt-dlp failed with exit code ${code}.`,
-            details: stderrData
-          });
+          const errorMsg = { error: "Failed to fetch media bytes.", details: stderrData };
+          res.write(JSON.stringify({ type: 'error', data: errorMsg }) + '\n');
+          return res.end();
         }
 
-        console.log(`Sending ${buffer.length} bytes to Gemini with prompt: "${prompt}"`);
+        // Notify frontend: Download complete, starting AI
+        res.write(JSON.stringify({ type: 'status', message: 'Processing audio with Gemini...' }) + '\n');
+
+        console.log(`Sending ${buffer.length} bytes to Gemini...`);
         let response;
         try {
           response = await genAI.models.generateContent({
-            model: "gemini-2.5-flash", // Updated for 2026 compatibility
+            model: "gemini-2.5-flash", 
             contents: {
               parts: [
                 {
@@ -475,50 +528,36 @@ app.post("/api/transcribe", async (req, res) => {
             }
           });
         } catch (initialErr) {
-          console.error("Gemini API call failed:", initialErr);
-          if (initialErr.message?.includes('not found')) {
-            console.error("Primary model not found, attempting to list models...");
-            try {
-              const modelList = await genAI.models.list();
-              console.log("Available models:", modelList.map(m => m.name).join(', '));
-            } catch (listErr) {
-              console.error("Could not list models:", listErr.message);
-            }
-          }
-          throw initialErr;
+            console.error("Gemini API Error:", initialErr);
+            throw initialErr;
         }
-        
-        // Log basic info about the response
-        console.log("Gemini response received. Candidates:", response.candidates?.length);
         
         if (!response.text) {
-          console.error("Gemini API Empty Response Object:", JSON.stringify(response, null, 2));
-          // Check for safety ratings if text is missing
-          const safetyRatings = response.candidates?.[0]?.safetyRatings;
-          const finishReason = response.candidates?.[0]?.finishReason;
-          throw new Error(`Gemini returned an empty response. Finish Reason: ${finishReason || 'UNKNOWN'}. Safety: ${JSON.stringify(safetyRatings || [])}`);
+          throw new Error("Gemini returned empty response");
         }
 
-        res.json(JSON.parse(response.text));
+        // Send Final Result
+        const resultData = JSON.parse(response.text);
+        res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+        res.end();
+
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
-        if (!res.headersSent) {
-          res.status(500).json({
-            error: `Gemini processing failed: ${geminiErr.message}`,
-            details: geminiErr.stack
-          });
-        }
+        res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message } }) + '\n');
+        res.end();
       }
     });
 
     child.on("error", (e) => {
       console.error("Spawn error:", e);
-      if (!res.headersSent) res.status(500).json({ error: "Failed to start downloader." });
+      res.write(JSON.stringify({ type: 'error', data: { message: "Failed to start downloader process" } }) + '\n');
+      res.end();
     });
 
   } catch (error) {
     console.error("Transcription error:", error);
-    if (!res.headersSent) res.status(500).json({ error: error.message });
+    res.write(JSON.stringify({ type: 'error', data: { message: error.message } }) + '\n');
+    res.end();
   }
 });
 
