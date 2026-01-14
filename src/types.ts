@@ -10,6 +10,8 @@ export interface ProcessingResult {
   originalText: string;
   translatedText: string;
   language: string;
+  title?: string;
+  sourceUrl?: string;
 }
 
 export interface LanguageOption {

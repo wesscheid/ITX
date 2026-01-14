@@ -15,8 +15,9 @@ export const translateVideo = async (
       Analyze this media file (Audio or Video).
       1. Transcribe the spoken audio verbatim in its original language.
       2. Translate the transcription into ${targetLanguage}.
+      3. Generate a short, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
       If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
@@ -42,8 +43,9 @@ export const translateVideo = async (
           properties: {
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
+            title: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText"],
+          required: ["originalText", "translatedText", "title"],
         },
       },
     });
@@ -58,6 +60,7 @@ export const translateVideo = async (
       originalText: result.originalText,
       translatedText: result.translatedText,
       language: targetLanguage,
+      title: result.title,
     };
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -78,8 +81,9 @@ export const translateVideoStream = async (
       Analyze this media file (Audio or Video).
       1. Transcribe the spoken audio verbatim in its original language.
       2. Translate the transcription into ${targetLanguage}.
+      3. Generate a short, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with two keys: "originalText" and "translatedText".
+      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
       If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
 
@@ -106,8 +110,9 @@ export const translateVideoStream = async (
           properties: {
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
+            title: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText"],
+          required: ["originalText", "translatedText", "title"],
         },
       },
     });
@@ -122,6 +127,7 @@ export const translateVideoStream = async (
       originalText: result.originalText,
       translatedText: result.translatedText,
       language: targetLanguage,
+      title: result.title,
     };
   } catch (error) {
     console.error("Gemini API Error:", error);

@@ -25,7 +25,7 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
       </button>
 
       <div className="inline-flex items-center justify-center mb-4">
-        <img src="/itx_logo.png" alt="InstaTranscribe Logo" className="h-16 w-auto" />
+        <img src="/itx_logo.png" alt="InstaTranscribe Logo" className="h-24 w-auto" />
       </div>
       <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600 mb-2">
         InstaTranscribe
