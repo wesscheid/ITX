@@ -26,3 +26,4 @@ dist-ssr
 # Cookies
 cookie_*.txt
 cookies_*.txt
+.env
