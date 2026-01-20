@@ -82,12 +82,22 @@ const App: React.FC = () => {
 
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setProgress({ stage: 'processing', percentage: 0, message: 'Processing with Gemini (Byte-Transfer)...' });
-    setStatus(AppStatus.PROCESSING);
+    setProgress({ stage: 'downloading', percentage: 0, message: 'Starting...' });
+    setStatus(AppStatus.DOWNLOADING);
 
     try {
       // Direct Byte Transfer: No browser download needed!
-      const data = await transcribeUrl(url, selectedLanguage);
+      const data = await transcribeUrl(url, selectedLanguage, (progressVal, message) => {
+        setProgress(prev => ({
+          stage: progressVal === 100 ? 'processing' : 'downloading',
+          percentage: progressVal,
+          message: message || (progressVal === 100 ? 'Processing with Gemini...' : 'Downloading...')
+        }));
+        
+        if (progressVal === 100) {
+           setStatus(AppStatus.PROCESSING);
+        }
+      });
       
       setResult(data);
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
