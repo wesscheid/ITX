@@ -12,9 +12,7 @@ const app = express();
 const PORT = process.env.PORT || 10000;
 
 // Initialize Gemini
-const genAI = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY 
-});
+const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -57,41 +55,79 @@ function safeFileName(base, ext) {
 }
 
 // ---------- Cookies Helper ----------
-function getCookiesPath() {
+function getCookiesPath(targetUrl) {
   let rawCookies = null;
-  const secretPath = "/etc/secrets/cookies.txt";
-
-  // 1. Check locations for cookies
-  if (fs.existsSync(secretPath)) {
-    console.log("✅ Found Render Secret File");
-    try {
-      rawCookies = fs.readFileSync(secretPath, "utf8");
-    } catch (e) {
-      console.error("Error reading secret file:", e);
+  const secretPath = "/etc/secrets/cookies.txt"; // Generic render secret
+  
+  // Domain-specific checks
+  if (targetUrl) {
+    const lowerUrl = targetUrl.toLowerCase();
+    
+    // X / Twitter
+    if (lowerUrl.includes("x.com") || lowerUrl.includes("twitter.com")) {
+      const xPath = path.join(__dirname, "../cookie_x.txt");
+      if (fs.existsSync(xPath)) {
+        console.log("✅ Found specific cookie file: cookie_x.txt");
+        rawCookies = fs.readFileSync(xPath, "utf8");
+      } else if (process.env.TWITTER_COOKIES) {
+        console.log("✅ Using TWITTER_COOKIES env var");
+        rawCookies = process.env.TWITTER_COOKIES;
+      }
+    }
+    
+    // Instagram
+    else if (lowerUrl.includes("instagram.com")) {
+      const igPath = path.join(__dirname, "../cookies_instagram.txt");
+      if (fs.existsSync(igPath)) {
+        console.log("✅ Found specific cookie file: cookies_instagram.txt");
+        rawCookies = fs.readFileSync(igPath, "utf8");
+      } else if (process.env.IG_COOKIES) {
+        console.log("✅ Using IG_COOKIES env var");
+        rawCookies = process.env.IG_COOKIES;
+      }
+    }
+    
+    // YouTube
+    else if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) {
+      const ytPath = path.join(__dirname, "../cookies_youtube.txt");
+      if (fs.existsSync(ytPath)) {
+        console.log("✅ Found specific cookie file: cookies_youtube.txt");
+        rawCookies = fs.readFileSync(ytPath, "utf8");
+      } else if (process.env.YOUTUBE_COOKIES) {
+        console.log("✅ Using YOUTUBE_COOKIES env var");
+        rawCookies = process.env.YOUTUBE_COOKIES;
+      }
     }
   }
 
-  if (!rawCookies && process.env.IG_COOKIES) {
-    console.log("✅ Using IG_COOKIES env var");
-    rawCookies = process.env.IG_COOKIES;
-  }
-
+  // Fallbacks if no specific cookie found yet
   if (!rawCookies) {
-    const commonPaths = [
-      "../cookies.txt",
-      "../cookies_ig.txt",
-      "../cookies_yt.txt",
-      "../cookies.env",
-      "cookies.txt",
-      "cookies_ig.txt"
-    ];
-    
-    for (const p of commonPaths) {
-      const fullPath = path.resolve(__dirname, p);
-      if (fs.existsSync(fullPath)) {
-        console.log(`✅ Using cookies from ${p}`);
-        rawCookies = fs.readFileSync(fullPath, "utf8");
-        break;
+    // 1. Check Generic Render Secret
+    if (fs.existsSync(secretPath)) {
+      console.log("✅ Found Render Secret File (Generic)");
+      try {
+        rawCookies = fs.readFileSync(secretPath, "utf8");
+      } catch (e) {
+        console.error("Error reading secret file:", e);
+      }
+    }
+
+    // 2. Generic IG_COOKIES env (legacy fallback)
+    if (!rawCookies && process.env.IG_COOKIES) {
+      // console.log("✅ Using IG_COOKIES env var (Fallback)");
+      rawCookies = process.env.IG_COOKIES;
+    }
+
+    // 3. Generic cookies.txt/.env in root
+    if (!rawCookies) {
+      const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
+      const rootCookiesEnv = path.join(__dirname, "../cookies.env");
+      if (fs.existsSync(rootCookiesTxt)) {
+        console.log("✅ Using root cookies.txt");
+        rawCookies = fs.readFileSync(rootCookiesTxt, "utf8");
+      } else if (fs.existsSync(rootCookiesEnv)) {
+        console.log("✅ Using root cookies.env");
+        rawCookies = fs.readFileSync(rootCookiesEnv, "utf8");
       }
     }
   }
@@ -103,7 +139,7 @@ function getCookiesPath() {
 
     // A. Check if already in Netscape format
     if (trimmed.startsWith("# Netscape") || trimmed.includes("\tTRUE\t")) {
-      const tempPath = path.join(os.tmpdir(), "cookies.txt");
+      const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
       // Ensure header exists
       const content = trimmed.startsWith("# Netscape") 
         ? trimmed 
@@ -177,7 +213,7 @@ function getCookiesPath() {
           });
 
           const finalCookies = "# Netscape HTTP Cookie File\n" + netscapeLines.join("\n") + "\n";
-          const tempPath = path.join(os.tmpdir(), "cookies.txt");
+          const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
           fs.writeFileSync(tempPath, finalCookies);
           console.log(`✅ Successfully converted ${allCookies.length} JSON cookies to Netscape format`);
           return tempPath;
@@ -219,7 +255,7 @@ function getCookiesPath() {
 
     const header = "# Netscape HTTP Cookie File";
     const cleanCookies = header + "\n" + finalLines.join("\n") + "\n";
-    const tempPath = path.join(os.tmpdir(), "cookies.txt");
+    const tempPath = path.join(os.tmpdir(), `cookies_${Date.now()}.txt`);
     fs.writeFileSync(tempPath, cleanCookies);
 
     return tempPath;
@@ -254,7 +290,7 @@ app.get("/api/resolve", (req, res) => {
     return res.json(cached.data);
   }
 
-  const cookiePath = getCookiesPath();
+  const cookiePath = getCookiesPath(cleanUrl);
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
   // 1. Try to get direct URL first (faster for some sites)
@@ -341,7 +377,7 @@ app.get("/api/download", (req, res) => {
   );
   res.setHeader("Content-Type", "video/mp4");
 
-  const cookiePath = getCookiesPath();
+  const cookiePath = getCookiesPath(url);
   const args = [
     "--user-agent",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -384,42 +420,94 @@ app.get("/api/download", (req, res) => {
   });
 });
 
-// ---------- TRANSCRIBE & TRANSLATE (Direct Byte Transfer) ----------
+// ---------- TRANSCRIBE & TRANSLATE (Streaming Progress) ----------
 app.post("/api/transcribe", async (req, res) => {
   const { url, targetLanguage } = req.body;
   if (!url) return res.status(400).json({ error: "Missing URL" });
 
+  // Set headers for streaming response (NDJSON)
+  res.setHeader('Content-Type', 'application/x-ndjson');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
   try {
+    const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
+
     const prompt = `
-      Analyze this media file (Audio or Video).
-      1. Create a short, descriptive title for the content (max 10 words).
-      2. Transcribe the spoken audio verbatim in its original language.
-      3. Translate the transcription into ${targetLanguage || 'English'}.
+      Analyze this media content (Audio or Video).
+      1. Transcribe the spoken audio verbatim in its original language.
+      2. Translate the transcription into ${targetLanguage || 'English'}.
+      3. Generate a short, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
-      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
+      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
+      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
     `;
+
+    // YouTube Strategy: Direct URL processing (Supported by Gemini 2.x)
+    if (isYouTube) {
+      console.log("YouTube URL detected, sending directly to Gemini:", url);
+      res.write(JSON.stringify({ type: 'status', message: 'Processing YouTube link directly with Gemini...' }) + '\n');
+      
+      try {
+        const response = await genAI.models.generateContent({
+          model: "gemini-2.5-flash",
+          contents: {
+            parts: [{ text: `Video URL: ${url}\n\n${prompt}` }]
+          },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                originalText: { type: Type.STRING },
+                translatedText: { type: Type.STRING },
+                title: { type: Type.STRING },
+              },
+              required: ["originalText", "translatedText", "title"],
+            },
+          }
+        });
+
+        if (response.text) {
+          const resultData = JSON.parse(response.text);
+          res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+          return res.end();
+        }
+      } catch (directErr) {
+        console.warn("Direct YouTube processing failed, falling back to yt-dlp:", directErr.message);
+      }
+    }
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
-    const cookiePath = getCookiesPath();
-    const args = [
+    const cookiePath = getCookiesPath(url);
+    const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba/bestaudio/best",
       "--no-playlist",
+      "--js-runtimes", "node",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
       "-o", "-",
       url
     ];
 
-    if (cookiePath) args.unshift("--cookies", cookiePath);
+    if (cookiePath) ytDlpArgs.unshift("--cookies", cookiePath);
 
-    const child = spawn(YTDLP_PATH, args);
+    console.log(`Executing yt-dlp command: "${YTDLP_PATH}" ${ytDlpArgs.join(" ")}`);
+    const child = spawn(YTDLP_PATH, ytDlpArgs);
     let chunks = [];
     let stderrData = "";
     let totalLength = 0;
     
+    // Parse progress from stderr
     child.stderr.on("data", (data) => {
-      stderrData += data.toString();
+      const text = data.toString();
+      stderrData += text;
+      
+      // Extract percentage: [download]  23.5% of ...
+      const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
+      if (match && match[1]) {
+        const percent = parseFloat(match[1]);
+        res.write(JSON.stringify({ type: 'progress', value: percent, stage: 'downloading' }) + '\n');
+      }
     });
 
     child.stdout.on("data", (chunk) => {
@@ -437,102 +525,76 @@ app.post("/api/transcribe", async (req, res) => {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
-          console.error("yt-dlp stderr:", stderrData);
-          return res.status(500).json({
-            error: `Failed to fetch media bytes (empty buffer).`,
-            details: stderrData || `yt-dlp exited with code ${code}`
-          });
+          const errorMsg = { error: "Failed to fetch media bytes.", details: stderrData };
+          res.write(JSON.stringify({ type: 'error', data: errorMsg }) + '\n');
+          return res.end();
         }
+
+        // Notify frontend: Download complete, starting AI
+        res.write(JSON.stringify({ type: 'status', message: 'Processing audio with Gemini...' }) + '\n');
 
         console.log(`Sending ${buffer.length} bytes to Gemini...`);
         let response;
         try {
-          const model = genAI.getGenerativeModel({ 
-            model: "gemini-2.5-flash",
-            generationConfig: {
+          response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash", 
+            contents: {
+              parts: [
+                {
+                  inlineData: {
+                    data: buffer.toString("base64"),
+                    mimeType: "audio/mp4"
+                  }
+                },
+                {
+                  text: prompt
+                }
+              ]
+            },
+            config: {
               responseMimeType: "application/json",
               responseSchema: {
                 type: Type.OBJECT,
                 properties: {
-                  title: { type: Type.STRING },
                   originalText: { type: Type.STRING },
                   translatedText: { type: Type.STRING },
+                  title: { type: Type.STRING },
                 },
-                required: ["title", "originalText", "translatedText"],
+                required: ["originalText", "translatedText", "title"],
               },
             }
           });
-
-          const result = await model.generateContent({
-            contents: [
-              {
-                parts: [
-                  {
-                    inlineData: {
-                      data: buffer.toString("base64"),
-                      mimeType: "audio/mp4"
-                    }
-                  },
-                  {
-                    text: prompt
-                  }
-                ]
-              }
-            ]
-          });
-          response = result.response;
         } catch (initialErr) {
-          if (initialErr.message?.includes('not found')) {
-            console.error("Primary model not found, attempting to list models...");
-            try {
-              const modelList = await genAI.models.list();
-              console.log("Available models:", modelList.map(m => m.name).join(', '));
-            } catch (listErr) {
-              console.error("Could not list models:", listErr.message);
-            }
-          }
-          throw initialErr;
+            console.error("Gemini API Error:", initialErr);
+            throw initialErr;
         }
         
-        // Log basic info about the response
-        console.log("Gemini response received.");
-        
-        const rawText = response.text();
-        if (!rawText) {
-          throw new Error(`Gemini returned an empty response text.`);
+        if (!response.text) {
+          throw new Error("Gemini returned empty response");
         }
 
-        try {
-          const parsed = JSON.parse(rawText);
-          res.json(parsed);
-        } catch (parseErr) {
-          console.error("Failed to parse Gemini response as JSON:", rawText);
-          // Fallback: if it's not JSON but has text, try to return it anyway
-          res.json({
-            title: "Transcription",
-            originalText: rawText,
-            translatedText: rawText
-          });
-        }
+        // Send Final Result
+        const resultData = JSON.parse(response.text);
+        res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+        res.end();
+
       } catch (geminiErr) {
         console.error("Gemini processing error:", geminiErr);
-        if (!res.headersSent) {
-          res.status(500).json({
-            error: `Gemini processing failed: ${geminiErr.message}`,
-            details: geminiErr.stack
-          });
-        }
+        res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message } }) + '\n');
+        res.end();
       }
     });
 
     child.on("error", (e) => {
       console.error("Spawn error:", e);
-      if (!res.headersSent) res.status(500).json({ error: "Failed to start downloader." });
+      res.write(JSON.stringify({ type: 'error', data: { message: "Failed to start downloader process" } }) + '\n');
+      res.end();
     });
 
   } catch (error) {
     console.error("Transcription error:", error);
-    if (!res.headersSent) res.status(500).json({ error: error.message });
+    res.write(JSON.stringify({ type: 'error', data: { message: error.message } }) + '\n');
+    res.end();
   }
 });
 
@@ -545,22 +607,17 @@ app.use((req, res) => {
   res.sendFile(path.join(distPath, "index.html"));
 });
 
-// ---------- PATH CONFIGURATION ----------
-const BIN_DIR = path.join(__dirname, "bin");
-process.env.PATH = `${BIN_DIR}${path.delimiter}${process.env.PATH}`;
-
-// Add Deno to PATH if it exists (for Render)
-const denoPath = path.join(os.homedir(), ".deno", "bin");
-if (fs.existsSync(denoPath)) {
-  process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
-  console.log("🦕 Deno added to PATH");
-}
-
 if (require.main === module) {
+  // Add Deno to PATH if it exists (for Render)
+  const denoPath = path.join(os.homedir(), ".deno", "bin");
+  if (fs.existsSync(denoPath)) {
+    process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
+    console.log("🦕 Deno added to PATH for yt-dlp");
+  }
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`✅ Universal Downloader Backend: http://localhost:${PORT}`);
     console.log(`🔗 Health: http://localhost:${PORT}/health`);
-    console.log(`📂 Binaries: ${BIN_DIR}`);
   });
 }
 
