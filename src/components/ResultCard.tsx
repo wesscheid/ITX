@@ -154,8 +154,6 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
           </div>
         )}
       </div>
-    </div>
-  );
 
       {/* Footer Action */}
       <div className="bg-slate-50 dark:bg-slate-800/50 border-t border-slate-100 dark:border-slate-700 p-4 flex justify-center">

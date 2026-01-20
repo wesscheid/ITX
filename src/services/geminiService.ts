@@ -22,24 +22,9 @@ export const translateVideo = async (
       If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
-    const model = ai.getGenerativeModel({ 
+    const response = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      }
-    });
-
-    const result = await model.generateContent({
-      contents: [{
+      contents: {
         parts: [
           {
             inlineData: {
@@ -51,15 +36,26 @@ export const translateVideo = async (
             text: prompt,
           },
         ],
-      }]
+      },
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["title", "originalText", "translatedText"],
+        },
+      },
     });
 
-    const responseText = result.response.text();
-    if (!responseText) {
+    if (!response.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(responseText);
+    const jsonResult = JSON.parse(response.text);
 
     return {
       title: jsonResult.title,
@@ -92,9 +88,35 @@ export const translateVideoStream = async (
       If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
     `;
 
-    const model = ai.getGenerativeModel({ 
+    // Convert file to base64 for browser-side inlineData
+    const reader = new FileReader();
+    const base64Promise = new Promise<string>((resolve, reject) => {
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const base64Data = await base64Promise;
+
+    const response = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
+      contents: {
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      },
+      config: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -105,31 +127,14 @@ export const translateVideoStream = async (
           },
           required: ["title", "originalText", "translatedText"],
         },
-      }
+      },
     });
 
-    const result = await model.generateContent({
-      contents: [{
-        parts: [
-          {
-            fileData: {
-              mimeType: mimeType,
-              fileUri: file instanceof File ? URL.createObjectURL(file) : '',
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
-      }]
-    });
-
-    const responseText = result.response.text();
-    if (!responseText) {
+    if (!response.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(responseText);
+    const jsonResult = JSON.parse(response.text);
 
     return {
       title: jsonResult.title,

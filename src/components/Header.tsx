@@ -30,7 +30,7 @@ const Header: React.FC<HeaderProps> = ({ isDark, toggleTheme }) => {
       <h1 className="text-4xl font-extrabold text-transparent bg-clip-text bg-gradient-to-r from-purple-600 to-pink-600 mb-2">
         InstaTranscribe
       </h1>
-            <p class="text-gray-600 dark:text-gray-400 mt-2 text-center text-lg">
+            <p className="text-gray-600 dark:text-gray-400 mt-2 text-center text-lg">
               Paste an Instagram link or upload a video file. We’ll transcribe the audio and translate it to your language in seconds.
             </p>
     </header>
