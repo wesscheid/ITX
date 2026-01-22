@@ -27,3 +27,6 @@ dist-ssr
 cookie_*.txt
 cookies_*.txt
 .env
+
+.vercel
+.env*.local

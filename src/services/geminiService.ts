@@ -13,13 +13,18 @@ export const translateVideo = async (
 
   try {
     const prompt = `
-      Analyze this media file (Audio or Video).
-      1. Create a short, descriptive title for the content (max 10 words).
-      2. Transcribe the spoken audio verbatim in its original language.
-      3. Translate the transcription into ${targetLanguage}.
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
+      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
-      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
+      Output MUST be a valid JSON object with these keys:
+      - "originalText": The verbatim transcription.
+      - "translatedText": The accurate translation.
+      - "title": The descriptive title.
+
+      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
     const response = await ai.models.generateContent({
@@ -79,13 +84,18 @@ export const translateVideoStream = async (
 
   try {
     const prompt = `
-      Analyze this media file (Audio or Video).
-      1. Create a short, descriptive title for the content (max 10 words).
-      2. Transcribe the spoken audio verbatim in its original language.
-      3. Translate the transcription into ${targetLanguage}.
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
+      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "title", "originalText", and "translatedText".
-      If there is no speech, provide a title, a description of the sound in the "originalText" field, and translate that description.
+      Output MUST be a valid JSON object with these keys:
+      - "originalText": The verbatim transcription.
+      - "translatedText": The accurate translation.
+      - "title": The descriptive title.
+
+      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
     // Convert file to base64 for browser-side inlineData

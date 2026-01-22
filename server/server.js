@@ -430,52 +430,20 @@ app.post("/api/transcribe", async (req, res) => {
   res.setHeader('Transfer-Encoding', 'chunked');
 
   try {
-    const isYouTube = url.includes("youtube.com") || url.includes("youtu.be");
-
     const prompt = `
-      Analyze this media content (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage || 'English'}.
-      3. Generate a short, descriptive title (max 5-7 words) for the content.
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
+      2. **Translation**: Translate the full transcription into ${targetLanguage || 'English'}. Ensure the translation is natural, accurate, and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Output MUST be a valid JSON object with these keys:
+      - "originalText": The verbatim transcription.
+      - "translatedText": The accurate translation.
+      - "title": The descriptive title.
+
+      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
-
-    // YouTube Strategy: Direct URL processing (Supported by Gemini 2.x)
-    if (isYouTube) {
-      console.log("YouTube URL detected, sending directly to Gemini:", url);
-      res.write(JSON.stringify({ type: 'status', message: 'Processing YouTube link directly with Gemini...' }) + '\n');
-      
-      try {
-        const response = await genAI.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: {
-            parts: [{ text: `Video URL: ${url}\n\n${prompt}` }]
-          },
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                originalText: { type: Type.STRING },
-                translatedText: { type: Type.STRING },
-                title: { type: Type.STRING },
-              },
-              required: ["originalText", "translatedText", "title"],
-            },
-          }
-        });
-
-        if (response.text) {
-          const resultData = JSON.parse(response.text);
-          res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
-          return res.end();
-        }
-      } catch (directErr) {
-        console.warn("Direct YouTube processing failed, falling back to yt-dlp:", directErr.message);
-      }
-    }
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
@@ -525,7 +493,8 @@ app.post("/api/transcribe", async (req, res) => {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
-          const errorMsg = { error: "Failed to fetch media bytes.", details: stderrData };
+          const details = stderrData;
+          const errorMsg = { error: "Failed to fetch media bytes.", details: details };
           res.write(JSON.stringify({ type: 'error', data: errorMsg }) + '\n');
           return res.end();
         }
