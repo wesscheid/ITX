@@ -1,0 +1,5 @@
+/api/transcribe:1  Failed to load resource: the server responded with a status of 500 ()
+index-D-IvvA0i.js:329 Error: Server error: 500 
+    at MR (index-D-IvvA0i.js:328:975)
+    at async B (index-D-IvvA0i.js:329:1695)
+B @ index-D-IvvA0i.js:329

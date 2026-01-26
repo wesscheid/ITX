@@ -33,8 +33,9 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
       downloadBlob(result.videoBlob, filename);
     } else if (result.videoUrl) {
       setIsDownloading(true);
-      // Construct the backend download URL
-      const downloadUrl = `/api/download?url=${encodeURIComponent(result.videoUrl)}`;
+      // Construct the backend download URL with title
+      const titleParam = result.title ? `&title=${encodeURIComponent(result.title)}` : '';
+      const downloadUrl = `/api/download?url=${encodeURIComponent(result.videoUrl)}${titleParam}`;
       
       // Use a hidden link to trigger the download
       const link = document.createElement('a');

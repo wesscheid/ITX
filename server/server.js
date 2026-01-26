@@ -360,7 +360,7 @@ app.get("/api/resolve", (req, res) => {
 
 // ---------- DOWNLOAD CONTENT ----------
 app.get("/api/download", (req, res) => {
-  const { url } = req.query;
+  const { url, title } = req.query;
 
   if (!url) {
     return res.status(400).json({ error: "Missing URL" });
@@ -370,7 +370,9 @@ app.get("/api/download", (req, res) => {
     return res.status(503).json({ error: "yt-dlp not available" });
   }
 
-  const filename = safeFileName("video", ".mp4");
+  const baseName = title ? title.toString() : "video";
+  const filename = safeFileName(baseName, ".mp4");
+  
   res.setHeader(
     "Content-Disposition",
     `attachment; filename="${filename}"`
