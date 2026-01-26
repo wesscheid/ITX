@@ -72,6 +72,10 @@ export const validateFile = (file: File): { isValid: boolean; error?: string } =
 
 export const downloadTextFile = (content: string, filename: string) => {
   const blob = new Blob([content], { type: 'text/plain' });
+  downloadBlob(blob, filename);
+};
+
+export const downloadBlob = (blob: Blob, filename: string) => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;

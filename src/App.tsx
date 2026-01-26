@@ -65,7 +65,10 @@ const App: React.FC = () => {
       const blob = chunksToBlob(chunks, file.type);
       const data = await translateVideoStream(blob, file.type, selectedLanguage);
       
-      setResult(data);
+      setResult({
+        ...data,
+        videoBlob: blob
+      });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error) {
@@ -99,7 +102,10 @@ const App: React.FC = () => {
         }
       });
       
-      setResult(data);
+      setResult({
+        ...data,
+        videoUrl: url
+      });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error: any) {

@@ -11,6 +11,8 @@ export interface ProcessingResult {
   originalText: string;
   translatedText: string;
   language: string;
+  videoUrl?: string;
+  videoBlob?: Blob;
 }
 
 export interface LanguageOption {

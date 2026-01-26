@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ProcessingResult } from '../types';
-import { downloadTextFile } from '../utils/fileHelpers';
+import { downloadTextFile, downloadBlob } from '../utils/fileHelpers';
 
 interface ResultCardProps {
   result: ProcessingResult;
@@ -10,6 +10,7 @@ interface ResultCardProps {
 const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
   const [copied, setCopied] = useState(false);
   const [canShare, setCanShare] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   const isSameText = result.originalText.trim() === result.translatedText.trim();
 
@@ -24,6 +25,29 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
       ? `Transcription:\n\n${result.originalText}`
       : `Original Transcription:\n\n${result.originalText}\n\n-------------------\n\nTranslation (${result.language}):\n\n${result.translatedText}`;
     downloadTextFile(content, `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`);
+  };
+
+  const handleDownloadVideo = () => {
+    if (result.videoBlob) {
+      const filename = `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp4`;
+      downloadBlob(result.videoBlob, filename);
+    } else if (result.videoUrl) {
+      setIsDownloading(true);
+      // Construct the backend download URL
+      const downloadUrl = `/api/download?url=${encodeURIComponent(result.videoUrl)}`;
+      
+      // Use a hidden link to trigger the download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      // The backend should set Content-Disposition, but we can also set download attribute
+      link.download = `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Reset state after a delay
+      setTimeout(() => setIsDownloading(false), 2000);
+    }
   };
 
   const handleShare = async () => {
@@ -117,13 +141,30 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
 
           <button
             onClick={handleDownload}
-            className="text-sm px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
+            className="text-sm px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Download .txt
           </button>
+
+          {(result.videoUrl || result.videoBlob) && (
+            <button
+              onClick={handleDownloadVideo}
+              disabled={isDownloading}
+              className={`text-sm px-3 py-1.5 rounded-md transition-colors flex items-center gap-2 shadow-sm ${
+                isDownloading 
+                  ? 'bg-purple-400 cursor-not-allowed' 
+                  : 'bg-purple-600 hover:bg-purple-700'
+              } text-white`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              {isDownloading ? 'Preparing...' : 'Download Video'}
+            </button>
+          )}
         </div>
       </div>
 
