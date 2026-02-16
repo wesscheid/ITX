@@ -66,10 +66,11 @@ const App: React.FC = () => {
       const blob = chunksToBlob(chunks, file.type);
       const data = await translateVideoStream(blob, file.type, selectedLanguage);
       
+      const titlePrefix = `${data.title}\n____________\n\n`;
       setResult({
         ...data,
-        originalText: data.originalText + sourceFooter,
-        translatedText: data.translatedText + sourceFooter,
+        originalText: titlePrefix + data.originalText + sourceFooter,
+        translatedText: titlePrefix + data.translatedText + sourceFooter,
         videoBlob: blob
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
@@ -121,10 +122,11 @@ const App: React.FC = () => {
       const platform = getPlatformName(url);
       const sourceFooter = `\n\n________________\nSource: ${platform} (${url})\nTranscribed on: ${new Date().toLocaleString()}`;
 
+      const titlePrefix = `${data.title}\n____________\n\n`;
       setResult({
         ...data,
-        originalText: data.originalText + sourceFooter,
-        translatedText: data.translatedText + sourceFooter,
+        originalText: titlePrefix + data.originalText + sourceFooter,
+        translatedText: titlePrefix + data.translatedText + sourceFooter,
         videoUrl: url
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
