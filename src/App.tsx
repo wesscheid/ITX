@@ -62,11 +62,14 @@ const App: React.FC = () => {
         }));
       });
 
+      const sourceFooter = `\n\n________________\nSource: Uploaded file (${file.name})\nTranscribed on: ${new Date().toLocaleString()}`;
       const blob = chunksToBlob(chunks, file.type);
       const data = await translateVideoStream(blob, file.type, selectedLanguage);
       
       setResult({
         ...data,
+        originalText: data.originalText + sourceFooter,
+        translatedText: data.translatedText + sourceFooter,
         videoBlob: blob
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
@@ -81,6 +84,19 @@ const App: React.FC = () => {
   const handleFileSelect = async (file: File) => {
     setErrorMsg(null);
     await processFile(file);
+  };
+
+  const getPlatformName = (url: string) => {
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '');
+      if (hostname.includes('instagram.com')) return 'Instagram';
+      if (hostname.includes('tiktok.com')) return 'TikTok';
+      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return 'YouTube';
+      if (hostname.includes('x.com') || hostname.includes('twitter.com')) return 'X (Twitter)';
+      return hostname;
+    } catch {
+      return 'Link';
+    }
   };
 
   const handleUrlSubmit = async (url: string) => {
@@ -102,8 +118,13 @@ const App: React.FC = () => {
         }
       });
       
+      const platform = getPlatformName(url);
+      const sourceFooter = `\n\n________________\nSource: ${platform} (${url})\nTranscribed on: ${new Date().toLocaleString()}`;
+
       setResult({
         ...data,
+        originalText: data.originalText + sourceFooter,
+        translatedText: data.translatedText + sourceFooter,
         videoUrl: url
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
