@@ -322,9 +322,22 @@ app.get("/api/resolve", (req, res) => {
       if (mErr) {
         const errorMsg = stderr || mErr.message;
         console.error("Metadata error:", errorMsg);
+
+        let frontendError = "Failed to resolve video";
+        // Check for common connection/blocking indicators in yt-dlp's stderr
+        if (errorMsg.includes("HTTP Error") || 
+            errorMsg.includes("Connection refused") ||
+            errorMsg.includes("blocked by") ||
+            errorMsg.includes("login required") ||
+            errorMsg.includes("Please provide --cookies") ||
+            errorMsg.includes("Unable to download webpage") ||
+            errorMsg.includes("No video formats found")) 
+        {
+          frontendError = "RESOLVER_CONNECTION_ERROR: Failed to resolve video, likely due to network or platform restrictions.";
+        }
         return res
           .status(500)
-          .json({ error: "Failed to resolve video", details: errorMsg });
+          .json({ error: frontendError, details: errorMsg });
       }
 
       try {
@@ -447,6 +460,56 @@ app.post("/api/transcribe", async (req, res) => {
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
+    const isYoutubeUrl = url.includes("youtube.com") || url.includes("youtu.be");
+
+    if (isYoutubeUrl) {
+      console.log("✅ YouTube URL detected, sending directly to Gemini...");
+      res.write(JSON.stringify({ type: 'status', message: 'Processing YouTube URL with Gemini...' }) + '\n');
+      
+      try {
+        const response = await genAI.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: {
+              parts: [
+                {
+                  fileData: {
+                    mimeType: "video/mp4",
+                    fileUri: url
+                  }
+                },
+                { text: prompt }
+              ]
+            },
+            config: {
+              responseMimeType: "application/json",
+              responseSchema: {
+                type: Type.OBJECT,
+                properties: {
+                  originalText: { type: Type.STRING },
+                  translatedText: { type: Type.STRING },
+                  title: { type: Type.STRING },
+                },
+                required: ["originalText", "translatedText", "title"],
+              },
+            }
+        });
+
+        if (!response.text) {
+          throw new Error("Gemini returned empty response for YouTube URL");
+        }
+
+        const resultData = JSON.parse(response.text);
+        res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+        return res.end();
+
+      } catch (geminiErr) {
+        console.error("Gemini processing error for YouTube URL:", geminiErr);
+        res.write(JSON.stringify({ type: 'error', data: { message: `Gemini error: ${geminiErr.message}` } }) + '\n');
+        return res.end();
+      }
+    }
+
+
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath(url);
@@ -496,7 +559,18 @@ app.post("/api/transcribe", async (req, res) => {
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
           const details = stderrData;
-          const errorMsg = { error: "Failed to fetch media bytes.", details: details };
+          let frontendErrorMsg = "Failed to fetch media bytes.";
+          if (details.includes("HTTP Error") || 
+              details.includes("Connection refused") ||
+              details.includes("blocked by") ||
+              details.includes("login required") ||
+              details.includes("Please provide --cookies") ||
+              details.includes("Unable to download webpage") ||
+              details.includes("No video formats found")) 
+          {
+            frontendErrorMsg = "RESOLVER_CONNECTION_ERROR: Failed to fetch media bytes, likely due to network or platform restrictions.";
+          }
+          const errorMsg = { error: frontendErrorMsg, details: details };
           res.write(JSON.stringify({ type: 'error', data: errorMsg }) + '\n');
           return res.end();
         }

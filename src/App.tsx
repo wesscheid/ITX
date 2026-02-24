@@ -7,14 +7,14 @@ import ResultCard from './components/ResultCard';
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
 import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
 import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
-import { fetchVideoFromUrl } from './services/videoDownloaderService';
+import { fetchVideoFromUrl, DownloaderError } from './services/videoDownloaderService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('English');
   const [activeTab, setActiveTab] = useState<'upload' | 'url'>('url');
   const [result, setResult] = useState<ProcessingResult | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<DownloaderError | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
   const [progress, setProgress] = useState<ProcessingProgress>({
     stage: 'downloading',
@@ -44,7 +44,7 @@ const App: React.FC = () => {
     // Validate file before processing
     const validation = validateFile(file);
     if (!validation.isValid) {
-      setErrorMsg(validation.error || "Invalid file");
+      setErrorMsg(new DownloaderError(validation.error || "Invalid file", "VALIDATION_ERROR"));
       setStatus(AppStatus.ERROR);
       return;
     }
@@ -78,7 +78,11 @@ const App: React.FC = () => {
     } catch (error) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg((error as Error).message || "An error occurred while processing the video with Gemini.");
+      if (error instanceof DownloaderError) {
+        setErrorMsg(error);
+      } else {
+        setErrorMsg(new DownloaderError(error.message || "An error occurred while processing the video with Gemini.", "GEMINI_PROCESS_ERROR"));
+      }
     }
   };
 
@@ -134,7 +138,11 @@ const App: React.FC = () => {
     } catch (error: any) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg(error.message || "Failed to process video via byte-transfer.");
+      if (error instanceof DownloaderError) {
+        setErrorMsg(error);
+      } else {
+        setErrorMsg(new DownloaderError(error.message || "Failed to process video via byte-transfer.", "BYTE_TRANSFER_ERROR"));
+      }
     }
   };
 
@@ -146,14 +154,15 @@ const App: React.FC = () => {
   };
 
   // Error Parsing Logic
-  const isManualDownloadNeeded = errorMsg?.includes('MANUAL_DOWNLOAD_REQUIRED|');
-  const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.split('|')[1] : null;
+  const isManualDownloadNeeded = errorMsg?.message?.includes('MANUAL_DOWNLOAD_REQUIRED|');
+  const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.message?.split('|')[1] : null;
   
-  const isResolverError = errorMsg?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.includes('Failed to fetch');
+  const isResolverError = errorMsg?.message?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.message?.includes('Failed to fetch');
 
   // Friendly error message display
   let displayErrorTitle = "Error";
-  let displayErrorText = errorMsg;
+  let displayErrorText = errorMsg?.message || "An unknown error occurred.";
+  let displayErrorDetails: string | undefined = undefined;
 
   if (isManualDownloadNeeded) {
     displayErrorTitle = "Automatic Download Blocked";
@@ -161,6 +170,7 @@ const App: React.FC = () => {
   } else if (isResolverError) {
     displayErrorTitle = "Connection Failed";
     displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
+    displayErrorDetails = errorMsg?.details; // Show backend yt-dlp details
   }
 
   return (
@@ -273,6 +283,11 @@ const App: React.FC = () => {
                       <li>Paste your Instagram link there and download the video/audio.</li>
                       <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
                     </ol>
+                    {displayErrorDetails && (
+                      <p className="mt-3 text-xs text-red-400 dark:text-red-500 font-mono bg-red-900/10 p-2 rounded-md overflow-x-auto">
+                        Details: {displayErrorDetails}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
