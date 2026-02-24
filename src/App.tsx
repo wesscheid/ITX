@@ -306,6 +306,7 @@ const App: React.FC = () => {
         
         <footer className="text-center text-slate-400 dark:text-slate-500 text-sm">
           <p>Powered by Gemini</p>
+          <p className="text-xs mt-1 opacity-75">v{import.meta.env.VITE_APP_VERSION}</p>
         </footer>
       </div>
     </div>
