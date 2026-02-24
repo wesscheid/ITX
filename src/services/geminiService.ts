@@ -1,7 +1,8 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProcessingResult } from "../types";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY || "";
+const ai = new GoogleGenAI({ apiKey });
 
 export const translateVideo = async (
   base64Data: string,
@@ -12,13 +13,18 @@ export const translateVideo = async (
 
   try {
     const prompt = `
-      Analyze this media file (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage}.
-      3. Generate a short, descriptive title (max 5-7 words) for the content.
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
+      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Output MUST be a valid JSON object with these keys:
+      - "originalText": The verbatim transcription.
+      - "translatedText": The accurate translation.
+      - "title": The descriptive title.
+
+      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
     const response = await ai.models.generateContent({
@@ -41,11 +47,11 @@ export const translateVideo = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            title: { type: Type.STRING },
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
-            title: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText", "title"],
+          required: ["title", "originalText", "translatedText"],
         },
       },
     });
@@ -54,13 +60,13 @@ export const translateVideo = async (
       throw new Error("No response text generated");
     }
 
-    const result = JSON.parse(response.text);
+    const jsonResult = JSON.parse(response.text);
 
     return {
-      originalText: result.originalText,
-      translatedText: result.translatedText,
+      title: jsonResult.title,
+      originalText: jsonResult.originalText,
+      translatedText: jsonResult.translatedText,
       language: targetLanguage,
-      title: result.title,
     };
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -78,24 +84,41 @@ export const translateVideoStream = async (
 
   try {
     const prompt = `
-      Analyze this media file (Audio or Video).
-      1. Transcribe the spoken audio verbatim in its original language.
-      2. Translate the transcription into ${targetLanguage}.
-      3. Generate a short, descriptive title (max 5-7 words) for the content.
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
+      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
       
-      Return the output in JSON format with three keys: "originalText", "translatedText", and "title".
-      If there is no speech, provide a description of the sound in the "originalText" field and translate that description.
+      Output MUST be a valid JSON object with these keys:
+      - "originalText": The verbatim transcription.
+      - "translatedText": The accurate translation.
+      - "title": The descriptive title.
+
+      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
-    // Use fileData instead of inlineData for better memory management
+    // Convert file to base64 for browser-side inlineData
+    const reader = new FileReader();
+    const base64Promise = new Promise<string>((resolve, reject) => {
+      reader.onload = () => {
+        const base64 = (reader.result as string).split(',')[1];
+        resolve(base64);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+    const base64Data = await base64Promise;
+
     const response = await ai.models.generateContent({
       model: modelId,
       contents: {
         parts: [
           {
-            fileData: {
+            inlineData: {
               mimeType: mimeType,
-              fileUri: file instanceof File ? URL.createObjectURL(file) : '',
+              data: base64Data,
             },
           },
           {
@@ -108,11 +131,11 @@ export const translateVideoStream = async (
         responseSchema: {
           type: Type.OBJECT,
           properties: {
+            title: { type: Type.STRING },
             originalText: { type: Type.STRING },
             translatedText: { type: Type.STRING },
-            title: { type: Type.STRING },
           },
-          required: ["originalText", "translatedText", "title"],
+          required: ["title", "originalText", "translatedText"],
         },
       },
     });
@@ -121,13 +144,13 @@ export const translateVideoStream = async (
       throw new Error("No response text generated");
     }
 
-    const result = JSON.parse(response.text);
+    const jsonResult = JSON.parse(response.text);
 
     return {
-      originalText: result.originalText,
-      translatedText: result.translatedText,
+      title: jsonResult.title,
+      originalText: jsonResult.originalText,
+      translatedText: jsonResult.translatedText,
       language: targetLanguage,
-      title: result.title,
     };
   } catch (error) {
     console.error("Gemini API Error:", error);
@@ -137,11 +160,12 @@ export const translateVideoStream = async (
 
 /**
  * NEW: Calls the backend to handle the full byte-transfer pipeline.
- * This is much more efficient than downloading to the browser first.
+ * Uses NDJSON streaming to provide real-time progress updates.
  */
 export const transcribeUrl = async (
   url: string,
-  targetLanguage: string
+  targetLanguage: string,
+  onProgress?: (progress: number, message: string) => void
 ): Promise<ProcessingResult> => {
   const response = await fetch('/api/transcribe', {
     method: 'POST',
@@ -152,13 +176,79 @@ export const transcribeUrl = async (
   });
 
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.error || 'Failed to transcribe video');
+    try {
+      const error = await response.json();
+      throw new Error(error.error || 'Failed to transcribe video');
+    } catch (e) {
+      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+    }
   }
 
-  const result = await response.json();
-  return {
-    ...result,
-    language: targetLanguage
-  };
+  if (!response.body) {
+    throw new Error('No response body received');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  let finalResult: ProcessingResult | null = null;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    
+    // Process full lines (NDJSON)
+    const lines = buffer.split('\n');
+    // Keep the last partial line in the buffer
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      
+      try {
+        const msg = JSON.parse(line);
+        
+        switch (msg.type) {
+          case 'progress':
+            if (onProgress) {
+              onProgress(msg.value, 'Downloading media...');
+            }
+            break;
+            
+          case 'status':
+            if (onProgress) {
+              // Usually 100% when status is sent
+              onProgress(100, msg.message);
+            }
+            break;
+            
+          case 'result':
+            finalResult = {
+              ...msg.data,
+              language: targetLanguage
+            };
+            break;
+            
+          case 'error':
+            throw new Error(msg.data?.message || msg.data?.error || 'Unknown server error');
+        }
+      } catch (e) {
+        // If it's a parse error from a partial line, we might ignore, 
+        // but since we split by \n, it should be fine.
+        if (e instanceof SyntaxError) {
+           console.warn('Failed to parse stream line:', line);
+           continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  if (!finalResult) {
+    throw new Error('Stream ended without a result');
+  }
+
+  return finalResult;
 };

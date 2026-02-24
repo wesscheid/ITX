@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ProcessingResult } from '../types';
-import { downloadTextFile } from '../utils/fileHelpers';
+import { downloadTextFile, downloadBlob } from '../utils/fileHelpers';
 
 interface ResultCardProps {
   result: ProcessingResult;
@@ -9,64 +9,66 @@ interface ResultCardProps {
 
 const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
   const [copied, setCopied] = useState(false);
+  const [canShare, setCanShare] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
-  // Robust comparison: normalize by removing punctuation, lowercasing, and collapsing whitespace
-  const normalize = (str: string) => str.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '').trim();
-  const isIdentical = normalize(result.originalText) === normalize(result.translatedText);
+  const isSameText = result.originalText.trim() === result.translatedText.trim();
+
+  React.useEffect(() => {
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      setCanShare(true);
+    }
+  }, []);
 
   const handleDownload = () => {
-    let content;
-    if (isIdentical) {
-      content = `Transcription:\n\n${result.translatedText}`;
-    } else {
-      content = `Original Transcription:\n\n${result.originalText}\n\n-------------------\n\nTranslation (${result.language}):\n\n${result.translatedText}`;
+    const content = isSameText 
+      ? `Transcription:\n\n${result.originalText}`
+      : `Original Transcription:\n\n${result.originalText}\n\n-------------------\n\nTranslation (${result.language}):\n\n${result.translatedText}`;
+    downloadTextFile(content, `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.txt`);
+  };
+
+  const handleDownloadVideo = () => {
+    if (result.videoBlob) {
+      const filename = `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp4`;
+      downloadBlob(result.videoBlob, filename);
+    } else if (result.videoUrl) {
+      setIsDownloading(true);
+      // Construct the backend download URL with title
+      const titleParam = result.title ? `&title=${encodeURIComponent(result.title)}` : '';
+      const downloadUrl = `/api/download?url=${encodeURIComponent(result.videoUrl)}${titleParam}`;
+      
+      // Use a hidden link to trigger the download
+      const link = document.createElement('a');
+      link.href = downloadUrl;
+      // The backend should set Content-Disposition, but we can also set download attribute
+      link.download = `${result.title.replace(/[^a-z0-9]/gi, '_').toLowerCase()}.mp4`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Reset state after a delay
+      setTimeout(() => setIsDownloading(false), 2000);
     }
-    
-    let filenamePrefix = 'transcript';
-    if (result.title) {
-      // Sanitize title: remove special chars, replace spaces with underscores, limit length
-      filenamePrefix = result.title
-        .toLowerCase()
-        .replace(/[^a-z0-9\s]/g, '')
-        .replace(/\s+/g, '_')
-        .substring(0, 30);
-    }
-    
-    downloadTextFile(content, `${filenamePrefix}_${result.language}.txt`);
   };
 
   const handleShare = async () => {
-    let content = `${result.translatedText}\n\n---\nSource: InstaTranscribe`;
-    if (result.sourceUrl) {
-      content += `\nURL: ${result.sourceUrl}`;
-    }
-
-    if (typeof navigator !== 'undefined' && navigator.share) {
-      try {
-        await navigator.share({
-          title: result.title || 'InstaTranscribe Translation',
-          text: content,
-        });
-      } catch (err) {
-        console.log('Share canceled or failed', err);
-      }
-    } else {
-      // Fallback for Desktop/Unsupported Browsers
-      try {
-        await navigator.clipboard.writeText(content);
-        alert('Native sharing is not supported on this device. The text has been copied to your clipboard!');
-      } catch (err) {
-        console.error('Failed to copy fallback', err);
-      }
+    const content = isSameText 
+      ? result.originalText 
+      : `${result.translatedText}\n\n---\nOriginal:\n${result.originalText}`;
+    try {
+      await navigator.share({
+        title: result.title || 'Transcription',
+        text: content,
+      });
+    } catch (err) {
+      console.log('Share canceled or failed', err);
     }
   };
 
   const handleCopyToNotes = async () => {
-    let content = `${result.translatedText}\n\n---\nSource: InstaTranscribe`;
-    if (result.sourceUrl) {
-      content += `\nURL: ${result.sourceUrl}`;
-    }
-    
+    const content = isSameText
+      ? result.originalText
+      : result.translatedText;
     try {
       await navigator.clipboard.writeText(content);
       setCopied(true);
@@ -79,24 +81,39 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
   return (
     <div className="bg-white dark:bg-slate-800 rounded-xl shadow-xl overflow-hidden animate-in slide-in-from-bottom-4 duration-500 border border-slate-100 dark:border-slate-700 transition-colors">
       <div className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-100 dark:border-slate-700 p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <h2 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
-          <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
-          </svg>
-          {isIdentical ? 'Transcription Complete' : 'Translation Complete'}
-        </h2>
-        <div className="flex flex-wrap gap-2 justify-center">
-          
-          <button
-            onClick={handleShare}
-            className="text-sm px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
-            title="Share to Google Keep, Notes, etc."
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+        <div className="flex flex-col">
+          <h2 className="font-semibold text-slate-700 dark:text-slate-200 flex items-center gap-2">
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
             </svg>
-            Share / Keep
+            Ready to Share
+          </h2>
+          {result.title && (
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5 font-medium italic">
+              "{result.title}"
+            </p>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-2 justify-center">
+          <button
+            onClick={onReset}
+            className="text-sm px-3 py-1.5 text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md transition-colors"
+          >
+            New Upload
           </button>
+          
+          {canShare && (
+            <button
+              onClick={handleShare}
+              className="text-sm px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
+              title="Share to Google Keep, Notes, etc."
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+              </svg>
+              Share / Keep
+            </button>
+          )}
 
           <button
             onClick={handleCopyToNotes}
@@ -125,21 +142,40 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
 
           <button
             onClick={handleDownload}
-            className="text-sm px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
+            className="text-sm px-3 py-1.5 bg-slate-600 hover:bg-slate-700 text-white rounded-md transition-colors flex items-center gap-2 shadow-sm"
           >
             <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
             </svg>
             Download .txt
           </button>
+
+          {(result.videoUrl || result.videoBlob) && (
+            <button
+              onClick={handleDownloadVideo}
+              disabled={isDownloading}
+              className={`text-sm px-3 py-1.5 rounded-md transition-colors flex items-center gap-2 shadow-sm ${
+                isDownloading 
+                  ? 'bg-purple-400 cursor-not-allowed' 
+                  : 'bg-purple-600 hover:bg-purple-700'
+              } text-white`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 10l4.553-2.276A1 1 0 0121 8.618v6.764a1 1 0 01-1.447.894L15 14M5 18h8a2 2 0 002-2V8a2 2 0 00-2-2H5a2 2 0 00-2 2v8a2 2 0 002 2z" />
+              </svg>
+              {isDownloading ? 'Preparing...' : 'Download Video'}
+            </button>
+          )}
         </div>
       </div>
 
-      <div className={`grid ${isIdentical ? 'grid-cols-1' : 'md:grid-cols-2 divide-y md:divide-y-0 md:divide-x'} divide-slate-100 dark:divide-slate-700`}>
-        {!isIdentical && (
+      <div className={`grid ${isSameText ? 'grid-cols-1' : 'md:grid-cols-2 divide-y md:divide-y-0 md:divide-x'} divide-slate-100 dark:divide-slate-700`}>
+        {(!isSameText || true) && (
           <div className="p-6">
             <div className="flex items-center justify-between mb-3">
-              <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">Original Audio</h3>
+              <h3 className="text-sm font-bold text-slate-400 dark:text-slate-500 uppercase tracking-wider">
+                {isSameText ? 'Transcription' : 'Original Audio'}
+              </h3>
             </div>
             <div className="bg-slate-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 whitespace-pre-wrap leading-relaxed">
               {result.originalText}
@@ -147,16 +183,18 @@ const ResultCard: React.FC<ResultCardProps> = ({ result, onReset }) => {
           </div>
         )}
 
-        <div className="p-6">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="text-sm font-bold text-purple-500 dark:text-purple-400 uppercase tracking-wider">
-               {isIdentical ? 'Transcription' : `Translation (${result.language})`}
-            </h3>
+        {!isSameText && (
+          <div className="p-6">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-bold text-purple-500 dark:text-purple-400 uppercase tracking-wider">
+                 Translation ({result.language})
+              </h3>
+            </div>
+            <div className="bg-purple-50 dark:bg-slate-900 rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border border-purple-100 dark:border-slate-800 text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed">
+              {result.translatedText}
+            </div>
           </div>
-          <div className={`${isIdentical ? 'bg-slate-50 dark:bg-slate-900' : 'bg-purple-50 dark:bg-slate-900'} rounded-lg p-4 h-64 overflow-y-auto custom-scrollbar border ${isIdentical ? 'border-slate-100 dark:border-slate-800' : 'border-purple-100 dark:border-slate-800'} text-slate-800 dark:text-slate-200 whitespace-pre-wrap leading-relaxed`}>
-            {result.translatedText}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* Footer Action */}

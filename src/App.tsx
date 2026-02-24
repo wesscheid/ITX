@@ -7,14 +7,14 @@ import ResultCard from './components/ResultCard';
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
 import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
 import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
-import { fetchVideoFromUrl } from './services/videoDownloaderService';
+import { fetchVideoFromUrl, DownloaderError } from './services/videoDownloaderService';
 
 const App: React.FC = () => {
   const [status, setStatus] = useState<AppStatus>(AppStatus.IDLE);
   const [selectedLanguage, setSelectedLanguage] = useState<string>('English');
   const [activeTab, setActiveTab] = useState<'upload' | 'url'>('url');
   const [result, setResult] = useState<ProcessingResult | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<DownloaderError | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
   const [progress, setProgress] = useState<ProcessingProgress>({
     stage: 'downloading',
@@ -44,7 +44,7 @@ const App: React.FC = () => {
     // Validate file before processing
     const validation = validateFile(file);
     if (!validation.isValid) {
-      setErrorMsg(validation.error || "Invalid file");
+      setErrorMsg(new DownloaderError(validation.error || "Invalid file", "VALIDATION_ERROR"));
       setStatus(AppStatus.ERROR);
       return;
     }
@@ -62,19 +62,27 @@ const App: React.FC = () => {
         }));
       });
 
+      const sourceFooter = `\n\n________________\nSource: Uploaded file (${file.name})\nTranscribed on: ${new Date().toLocaleString()}`;
       const blob = chunksToBlob(chunks, file.type);
       const data = await translateVideoStream(blob, file.type, selectedLanguage);
       
+      const titlePrefix = `${data.title}\n____________\n\n`;
       setResult({
         ...data,
-        sourceUrl: `File: ${file.name}`
+        originalText: titlePrefix + data.originalText + sourceFooter,
+        translatedText: titlePrefix + data.translatedText + sourceFooter,
+        videoBlob: blob
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg((error as Error).message || "An error occurred while processing the video with Gemini.");
+      if (error instanceof DownloaderError) {
+        setErrorMsg(error);
+      } else {
+        setErrorMsg(new DownloaderError(error.message || "An error occurred while processing the video with Gemini.", "GEMINI_PROCESS_ERROR"));
+      }
     }
   };
 
@@ -83,25 +91,58 @@ const App: React.FC = () => {
     await processFile(file);
   };
 
+  const getPlatformName = (url: string) => {
+    try {
+      const hostname = new URL(url).hostname.replace('www.', '');
+      if (hostname.includes('instagram.com')) return 'Instagram';
+      if (hostname.includes('tiktok.com')) return 'TikTok';
+      if (hostname.includes('youtube.com') || hostname.includes('youtu.be')) return 'YouTube';
+      if (hostname.includes('x.com') || hostname.includes('twitter.com')) return 'X (Twitter)';
+      return hostname;
+    } catch {
+      return 'Link';
+    }
+  };
+
   const handleUrlSubmit = async (url: string) => {
     setErrorMsg(null);
-    setProgress({ stage: 'processing', percentage: 0, message: 'Processing with Gemini (Byte-Transfer)...' });
-    setStatus(AppStatus.PROCESSING);
+    setProgress({ stage: 'downloading', percentage: 0, message: 'Starting...' });
+    setStatus(AppStatus.DOWNLOADING);
 
     try {
       // Direct Byte Transfer: No browser download needed!
-      const data = await transcribeUrl(url, selectedLanguage);
+      const data = await transcribeUrl(url, selectedLanguage, (progressVal, message) => {
+        setProgress(prev => ({
+          stage: progressVal === 100 ? 'processing' : 'downloading',
+          percentage: progressVal,
+          message: message || (progressVal === 100 ? 'Processing with Gemini...' : 'Downloading...')
+        }));
+        
+        if (progressVal === 100) {
+           setStatus(AppStatus.PROCESSING);
+        }
+      });
       
+      const platform = getPlatformName(url);
+      const sourceFooter = `\n\n________________\nSource: ${platform} (${url})\nTranscribed on: ${new Date().toLocaleString()}`;
+
+      const titlePrefix = `${data.title}\n____________\n\n`;
       setResult({
         ...data,
-        sourceUrl: url
+        originalText: titlePrefix + data.originalText + sourceFooter,
+        translatedText: titlePrefix + data.translatedText + sourceFooter,
+        videoUrl: url
       });
       setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
       setStatus(AppStatus.SUCCESS);
     } catch (error: any) {
       console.error(error);
       setStatus(AppStatus.ERROR);
-      setErrorMsg(error.message || "Failed to process video via byte-transfer.");
+      if (error instanceof DownloaderError) {
+        setErrorMsg(error);
+      } else {
+        setErrorMsg(new DownloaderError(error.message || "Failed to process video via byte-transfer.", "BYTE_TRANSFER_ERROR"));
+      }
     }
   };
 
@@ -113,14 +154,15 @@ const App: React.FC = () => {
   };
 
   // Error Parsing Logic
-  const isManualDownloadNeeded = errorMsg?.includes('MANUAL_DOWNLOAD_REQUIRED|');
-  const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.split('|')[1] : null;
+  const isManualDownloadNeeded = errorMsg?.message?.includes('MANUAL_DOWNLOAD_REQUIRED|');
+  const manualDownloadUrl = isManualDownloadNeeded ? errorMsg?.message?.split('|')[1] : null;
   
-  const isResolverError = errorMsg?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.includes('Failed to fetch');
+  const isResolverError = errorMsg?.message?.includes('RESOLVER_CONNECTION_ERROR') || errorMsg?.message?.includes('Failed to fetch');
 
   // Friendly error message display
   let displayErrorTitle = "Error";
-  let displayErrorText = errorMsg;
+  let displayErrorText = errorMsg?.message || "An unknown error occurred.";
+  let displayErrorDetails: string | undefined = undefined;
 
   if (isManualDownloadNeeded) {
     displayErrorTitle = "Automatic Download Blocked";
@@ -128,6 +170,7 @@ const App: React.FC = () => {
   } else if (isResolverError) {
     displayErrorTitle = "Connection Failed";
     displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
+    displayErrorDetails = errorMsg?.details; // Show backend yt-dlp details
   }
 
   return (
@@ -240,6 +283,11 @@ const App: React.FC = () => {
                       <li>Paste your Instagram link there and download the video/audio.</li>
                       <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
                     </ol>
+                    {displayErrorDetails && (
+                      <p className="mt-3 text-xs text-red-400 dark:text-red-500 font-mono bg-red-900/10 p-2 rounded-md overflow-x-auto">
+                        Details: {displayErrorDetails}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -258,7 +306,6 @@ const App: React.FC = () => {
         
         <footer className="text-center text-slate-400 dark:text-slate-500 text-sm">
           <p>Powered by Gemini</p>
-          <p className="text-xs mt-1 opacity-75">v{process.env.APP_VERSION}</p>
         </footer>
       </div>
     </div>

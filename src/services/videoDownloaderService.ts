@@ -6,7 +6,7 @@ const LOCAL_API_BASE = '';
  * Custom Error class for downloader issues
  */
 export class DownloaderError extends Error {
-  constructor(message: string, public code: string = 'UNKNOWN_ERROR') {
+  constructor(message: string, public code: string = 'UNKNOWN_ERROR', public details?: string) {
     super(message);
     this.name = 'DownloaderError';
   }
@@ -51,11 +51,27 @@ export const fetchVideoFromUrl = async (
     const metaResponse = await fetch(apiUrl);
     
     if (!metaResponse.ok) {
-       // If local server isn't running
-       if (metaResponse.status === 404 || metaResponse.status === 500) {
-           throw new DownloaderError('Local downloader service error. Is the server running?', 'SERVER_ERROR');
+       let errorBody: any = {};
+       try {
+           errorBody = await metaResponse.json(); // Attempt to parse JSON error body
+       } catch (e) {
+           // Ignore if not valid JSON or no body
        }
-       throw new DownloaderError('Failed to resolve video.', 'RESOLVE_ERROR');
+
+       // If local server isn't running or a generic server error
+       if (metaResponse.status === 404 || metaResponse.status === 500) {
+           throw new DownloaderError(
+               errorBody.error || 'Local downloader service error. Is the server running?', 
+               errorBody.code || 'SERVER_ERROR',
+               errorBody.details // Pass details if available
+           );
+       }
+       // Other non-2xx responses from backend's /api/resolve
+       throw new DownloaderError(
+           errorBody.error || 'Failed to resolve video.', 
+           errorBody.code || 'RESOLVE_ERROR',
+           errorBody.details // Pass details if available
+       );
     }
 
     const metaData = await metaResponse.json();
