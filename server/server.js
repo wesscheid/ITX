@@ -455,54 +455,7 @@ app.post("/api/transcribe", async (req, res) => {
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
-    const isYoutubeUrl = url.includes("youtube.com") || url.includes("youtu.be");
 
-    if (isYoutubeUrl) {
-      console.log("✅ YouTube URL detected, sending directly to Gemini...");
-      res.write(JSON.stringify({ type: 'status', message: 'Processing YouTube URL with Gemini...' }) + '\n');
-      
-      try {
-        const response = await genAI.models.generateContent({
-            model: "gemini-2.5-flash",
-            contents: {
-              parts: [
-                {
-                  fileData: {
-                    mimeType: "video/mp4",
-                    fileUri: url
-                  }
-                },
-                { text: prompt }
-              ]
-            },
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  originalText: { type: Type.STRING },
-                  translatedText: { type: Type.STRING },
-                  title: { type: Type.STRING },
-                },
-                required: ["originalText", "translatedText", "title"],
-              },
-            }
-        });
-
-        if (!response.text) {
-          throw new Error("Gemini returned empty response for YouTube URL");
-        }
-
-        const resultData = JSON.parse(response.text);
-        res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
-        return res.end();
-
-      } catch (geminiErr) {
-        console.error("Gemini processing error for YouTube URL:", geminiErr);
-        res.write(JSON.stringify({ type: 'error', data: { message: `Gemini error: ${geminiErr.message}` } }) + '\n');
-        return res.end();
-      }
-    }
 
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
