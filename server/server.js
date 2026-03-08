@@ -316,8 +316,17 @@ app.get("/api/resolve", (req, res) => {
   const cookiePath = getCookiesPath(cleanUrl); // Pass cleanUrl to getCookiesPath
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
+  let extractorArgs = "";
+  if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) {
+    extractorArgs = '--extractor-args "youtube:player_client=ios,web"';
+    const poToken = getPoToken("ios");
+    if (poToken) {
+      extractorArgs = `--extractor-args "youtube:player_client=ios,web;po_token=ios+${poToken}"`;
+    }
+  }
+
   // 1. Try to get direct URL first (faster for some sites)
-  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
+  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" ${cookieArg} ${extractorArgs} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
 
   exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
     if (!err && stdout.trim()) {
