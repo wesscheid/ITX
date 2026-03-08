@@ -67,6 +67,21 @@ function safeFileName(base, ext) {
   return `${s}_${Date.now()}${ext}`;
 }
 
+/**
+ * Get PO Token for YouTube clients.
+ * Prioritizes environment variables.
+ */
+function getPoToken(client = "ios") {
+  if (client === "ios" && process.env.YOUTUBE_PO_TOKEN_IOS) {
+    return process.env.YOUTUBE_PO_TOKEN_IOS;
+  }
+  if (client === "web" && process.env.YOUTUBE_PO_TOKEN_WEB) {
+    return process.env.YOUTUBE_PO_TOKEN_WEB;
+  }
+  // Generic fallback if user just provided one
+  return process.env.YOUTUBE_PO_TOKEN || null;
+}
+
 // ---------- Cookies Helper ----------
 function getCookiesPath(targetUrl) {
   let rawCookies = null;
@@ -474,13 +489,22 @@ app.post("/api/transcribe", async (req, res) => {
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath(url); // Pass url to getCookiesPath
+    
+    // Construct extractor args with PO Token if available
+    let extractorArgs = "youtube:player_client=ios,web";
+    const poToken = getPoToken("ios");
+    if (poToken) {
+      extractorArgs += `;po_token=ios+${poToken}`;
+      console.log("🔑 Using YOUTUBE_PO_TOKEN_IOS");
+    }
+
     const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
       "--no-playlist",
       "--js-runtimes", "deno",
       "--js-runtimes", "node",
-      "--extractor-args", "youtube:player_client=tv,mweb,web",
-      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+      "--extractor-args", extractorArgs,
+      "--user-agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1",
       "-o", "-",
       url
     ];
