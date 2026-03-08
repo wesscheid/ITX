@@ -37,3 +37,9 @@ server/bin/yt-dlp.exe
 server/bin/ffmpeg
 server/bin/deno/
 
+
+# Large assets
+public/*.mov
+public/*.mp4
+bin/
+
