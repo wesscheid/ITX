@@ -4,10 +4,15 @@ const os = require("os");
 const fs = require("fs");
 
 // Add Deno to PATH if it exists (CRITICAL for YouTube on Vercel/Render)
-const denoPath = path.join(os.homedir(), ".deno", "bin");
-if (fs.existsSync(denoPath)) {
-  process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
-  console.log("🦕 Deno added to PATH for yt-dlp");
+const localDenoPath = path.join(__dirname, "bin", "deno", "bin");
+const homeDenoPath = path.join(os.homedir(), ".deno", "bin");
+
+if (fs.existsSync(localDenoPath)) {
+  process.env.PATH = `${localDenoPath}${path.delimiter}${process.env.PATH}`;
+  console.log("🦕 Local Deno added to PATH");
+} else if (fs.existsSync(homeDenoPath)) {
+  process.env.PATH = `${homeDenoPath}${path.delimiter}${process.env.PATH}`;
+  console.log("🦕 Home Deno added to PATH");
 }
 
 require("dotenv").config({ path: path.join(__dirname, "../.env") });
@@ -472,8 +477,7 @@ app.post("/api/transcribe", async (req, res) => {
     const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
       "--no-playlist",
-      "--js-runtimes", "deno",
-      "--js-runtimes", "node",
+      "--js-runtimes", "deno,node",
       "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       "-o", "-",
       url
