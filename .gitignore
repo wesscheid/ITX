@@ -30,3 +30,10 @@ cookies_*.txt
 
 .vercel
 .env*.local
+
+# Binaries
+server/bin/yt-dlp
+server/bin/yt-dlp.exe
+server/bin/ffmpeg
+server/bin/deno/
+

@@ -160,7 +160,7 @@ const downloadFfmpeg = async () => {
 (async () => {
     try {
         await downloadYtdlp();
-        await downloadFfmpeg();
+        // await downloadFfmpeg();
         console.log("🚀 Binaries ready!");
     } catch (error) {
         console.error("❌ Failed to download binaries:", error.message);
