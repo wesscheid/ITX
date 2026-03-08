@@ -1,11 +1,19 @@
 // backend/server.js
 const path = require("path");
+const os = require("os");
+const fs = require("fs");
+
+// Add Deno to PATH if it exists (CRITICAL for YouTube on Vercel/Render)
+const denoPath = path.join(os.homedir(), ".deno", "bin");
+if (fs.existsSync(denoPath)) {
+  process.env.PATH = `${denoPath}${path.delimiter}${process.env.PATH}`;
+  console.log("🦕 Deno added to PATH for yt-dlp");
+}
+
 require("dotenv").config({ path: path.join(__dirname, "../.env") });
 const express = require("express");
 const cors = require("cors");
 const { exec, spawn } = require("child_process");
-const fs = require("fs");
-const os = require("os");
 const { GoogleGenAI, Type } = require("@google/genai");
 
 const app = express();
@@ -462,10 +470,11 @@ app.post("/api/transcribe", async (req, res) => {
     console.log("Fetching bytes for platform:", url);
     const cookiePath = getCookiesPath(url); // Pass url to getCookiesPath
     const ytDlpArgs = [
-      "-f", "ba[ext=m4a]/ba/bestaudio/best",
+      "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
       "--no-playlist",
+      "--js-runtimes", "deno",
       "--js-runtimes", "node",
-      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
       "-o", "-",
       url
     ];
@@ -475,7 +484,9 @@ app.post("/api/transcribe", async (req, res) => {
     }
 
     console.log(`Executing yt-dlp command: "${YTDLP_PATH}" ${ytDlpArgs.join(" ")}`);
-    const child = spawn(YTDLP_PATH, ytDlpArgs);
+    const child = spawn(YTDLP_PATH, ytDlpArgs, {
+      env: { ...process.env }
+    });
     let chunks = [];
     let stderrData = "";
     let totalLength = 0;
@@ -508,9 +519,13 @@ app.post("/api/transcribe", async (req, res) => {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
           console.error("Buffer is empty after yt-dlp. Exit code:", code);
+          console.error("yt-dlp stderr output:", stderrData);
           const details = stderrData;
           let frontendErrorMsg = "Failed to fetch media bytes.";
-          if (details.includes("HTTP Error") || 
+          
+          if (details.includes("Sign in to confirm you’re not a bot") || details.includes("cookies are no longer valid")) {
+            frontendErrorMsg = "YOUTUBE_COOKIE_EXPIRED: Your YouTube session cookies have expired or been rotated. Please update cookies_youtube.txt with a fresh export from your browser.";
+          } else if (details.includes("HTTP Error") || 
               details.includes("Connection refused") ||
               details.includes("blocked by") ||
               details.includes("login required") ||

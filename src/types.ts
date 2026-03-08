@@ -11,15 +11,9 @@ export interface ProcessingResult {
   originalText: string;
   translatedText: string;
   language: string;
-export interface ProcessingResult {
-  title: string;
-  originalText: string;
-  translatedText: string;
-  language: string;
   sourceUrl?: string;
   videoUrl?: string;
   videoBlob?: Blob;
-}
 }
 
 export interface LanguageOption {

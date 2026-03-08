@@ -49,7 +49,7 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY),
         'process.env.GEMINI_API_KEY': JSON.stringify(env.VITE_API_KEY),
-        'process.env.APP_VERSION': JSON.stringify(appVersion)
+        'import.meta.env.VITE_APP_VERSION': JSON.stringify(process.env.npm_package_version || '0.0.5')
       },
       resolve: {
         alias: {
