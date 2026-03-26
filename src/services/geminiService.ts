@@ -165,7 +165,7 @@ export const translateVideoStream = async (
 export const transcribeUrl = async (
   url: string,
   targetLanguage: string,
-  onProgress?: (progress: number, message: string) => void
+  onProgress?: (progress: number, message: string, log?: string) => void
 ): Promise<ProcessingResult> => {
   const response = await fetch('/api/transcribe', {
     method: 'POST',
@@ -211,6 +211,12 @@ export const transcribeUrl = async (
         const msg = JSON.parse(line);
         
         switch (msg.type) {
+          case 'log':
+            if (onProgress) {
+              onProgress(-1, '', msg.message);
+            }
+            break;
+
           case 'progress':
             if (onProgress) {
               onProgress(msg.value, 'Downloading media...');

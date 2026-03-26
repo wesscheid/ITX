@@ -504,8 +504,16 @@ app.post("/api/transcribe", async (req, res) => {
     const poToken = getPoToken("ios");
     if (poToken) {
       extractorArgs += `;po_token=ios+${poToken}`;
-      console.log("🔑 Using YOUTUBE_PO_TOKEN_IOS");
     }
+
+    // Get yt-dlp version for system info
+    let ytDlpVersion = "unknown";
+    try {
+      ytDlpVersion = require("child_process").execSync(`"${YTDLP_PATH}" --version`).toString().trim();
+    } catch (e) {}
+
+    // Send initial system info
+    res.write(JSON.stringify({ type: 'log', message: `System Online | Core: yt-dlp ${ytDlpVersion}` }) + '\n');
 
     const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
@@ -522,7 +530,9 @@ app.post("/api/transcribe", async (req, res) => {
       ytDlpArgs.unshift("--cookies", cookiePath);
     }
 
-    console.log(`Executing yt-dlp command: "${YTDLP_PATH}" ${ytDlpArgs.join(" ")}`);
+    const fullCommand = `yt-dlp ${ytDlpArgs.join(" ")}`;
+    res.write(JSON.stringify({ type: 'log', message: `Running command: '${fullCommand}'` }) + '\n');
+
     const child = spawn(YTDLP_PATH, ytDlpArgs, {
       env: { ...process.env }
     });
@@ -530,11 +540,18 @@ app.post("/api/transcribe", async (req, res) => {
     let stderrData = "";
     let totalLength = 0;
     
-    // Parse progress from stderr
+    // Parse progress and logs from stderr
     child.stderr.on("data", (data) => {
       const text = data.toString();
       stderrData += text;
       
+      // Send raw log to frontend
+      text.split('\n').forEach(line => {
+        if (line.trim()) {
+          res.write(JSON.stringify({ type: 'log', message: line.trim() }) + '\n');
+        }
+      });
+
       // Extract percentage: [download]  23.5% of ...
       const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
       if (match && match[1]) {

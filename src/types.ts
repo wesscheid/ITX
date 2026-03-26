@@ -25,6 +25,7 @@ export interface ProcessingProgress {
   stage: 'downloading' | 'processing' | 'transcribing' | 'complete';
   percentage: number;
   message: string;
+  logs?: string[];
 }
 
 export interface FileValidationResult {
