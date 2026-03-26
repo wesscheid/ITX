@@ -37,10 +37,10 @@ const downloadYtdlp = async () => {
             });
         });
     } else {
-        // Preferred binary name is 'yt-dlp' for Linux/macOS
-        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
+        // Use yt-dlp_linux (PyInstaller bundle) as it is standalone and doesn't require system Python
+        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
         ytdlpPath = path.join(binDir, 'yt-dlp');
-        console.log(`Downloading for Linux/macOS from ${ytdlpUrl}`);
+        console.log(`Downloading for Linux (Standalone) from ${ytdlpUrl}`);
         // Use curl for Linux/macOS
         const command = 'curl';
         const args = ['-L', ytdlpUrl, '-o', ytdlpPath];
