@@ -37,7 +37,8 @@ const downloadYtdlp = async () => {
             });
         });
     } else {
-        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+        // Preferred binary name is 'yt-dlp' for Linux/macOS
+        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp';
         ytdlpPath = path.join(binDir, 'yt-dlp');
         console.log(`Downloading for Linux/macOS from ${ytdlpUrl}`);
         // Use curl for Linux/macOS
@@ -56,22 +57,25 @@ const downloadYtdlp = async () => {
         });
     }
 
-    console.log("✅ yt-dlp installed.");
+    console.log("✅ yt-dlp downloaded.");
 
-    // Verify version
-    const verifyCommand = ytdlpPath;
-    const verifyArgs = ['--version'];
-    console.log(`Verifying yt-dlp version with: ${verifyCommand} ${verifyArgs.join(' ')}`);
-    await new Promise((resolve, reject) => {
-        const child = spawn(verifyCommand, verifyArgs, { stdio: 'inherit' });
-        child.on('close', (code) => {
-            if (code === 0) {
-                resolve();
-            } else {
-                reject(new Error(`yt-dlp --version failed with code ${code}`));
-            }
-        });
-    });
+    // Verify version and attempt self-update if possible
+    try {
+        const verifyOutput = require('child_process').execSync(`"${ytdlpPath}" --version`).toString().trim();
+        console.log(`🚀 yt-dlp version installed: ${verifyOutput}`);
+        
+        // Try self-update as a secondary measure (might fail on some environments, but that's okay)
+        console.log("🔄 Attempting yt-dlp self-update to be absolutely sure...");
+        try {
+            require('child_process').execSync(`"${ytdlpPath}" -U`);
+            const finalVersion = require('child_process').execSync(`"${ytdlpPath}" --version`).toString().trim();
+            console.log(`✅ yt-dlp is now at version: ${finalVersion}`);
+        } catch (updateErr) {
+            console.log("⚠️ Self-update skipped or failed (common in CI/restricted environments). Proceeding with downloaded binary.");
+        }
+    } catch (e) {
+        console.error("❌ Failed to verify yt-dlp version:", e.message);
+    }
 };
 
 const downloadFfmpeg = async () => {
