@@ -4,6 +4,7 @@ import FileUpload from './components/FileUpload';
 import UrlInput from './components/UrlInput';
 import ProcessingState from './components/ProcessingState';
 import ResultCard from './components/ResultCard';
+import LogConsole from './components/LogConsole';
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
 import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
 import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
@@ -309,7 +310,14 @@ const App: React.FC = () => {
 
           {/* Result State */}
           {status === AppStatus.SUCCESS && result && (
-            <ResultCard result={result} onReset={handleReset} />
+            <div className="space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+              <LogConsole 
+                logs={progress.logs || []} 
+                title="Resolution History" 
+                defaultExpanded={false} 
+              />
+              <ResultCard result={result} onReset={handleReset} />
+            </div>
           )}
 
         </div>
