@@ -144,7 +144,12 @@ const App: React.FC = () => {
         translatedText: titlePrefix + data.translatedText + sourceFooter,
         videoUrl: url
       });
-      setProgress({ stage: 'complete', percentage: 100, message: 'Processing complete' });
+      setProgress(prev => ({ 
+        ...prev, 
+        stage: 'complete', 
+        percentage: 100, 
+        message: 'Processing complete' 
+      }));
       setStatus(AppStatus.SUCCESS);
     } catch (error: any) {
       console.error(error);
@@ -314,7 +319,7 @@ const App: React.FC = () => {
               <LogConsole 
                 logs={progress.logs || []} 
                 title="Resolution History" 
-                defaultExpanded={false} 
+                defaultExpanded={true} 
               />
               <ResultCard result={result} onReset={handleReset} />
             </div>
