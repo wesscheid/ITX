@@ -106,8 +106,14 @@ function getCookiesPath(targetUrl) {
     // Instagram
     else if (lowerUrl.includes("instagram.com")) {
       const igPath = path.join(__dirname, "../cookies_instagram.txt");
-      if (fs.existsSync(igPath)) {
-        console.log("✅ Found specific cookie file: cookies_instagram.txt");
+      const igTmpPath = path.join(os.tmpdir(), "cookies_instagram.txt");
+      
+      // Prioritize /tmp (user updates) over bundled files
+      if (fs.existsSync(igTmpPath)) {
+        console.log("✅ Found updated cookie file: /tmp/cookies_instagram.txt");
+        rawCookies = fs.readFileSync(igTmpPath, "utf8");
+      } else if (fs.existsSync(igPath)) {
+        console.log("✅ Found bundled cookie file: cookies_instagram.txt");
         rawCookies = fs.readFileSync(igPath, "utf8");
       } else if (process.env.IG_COOKIES) {
         console.log("✅ Using IG_COOKIES env var");
@@ -118,8 +124,14 @@ function getCookiesPath(targetUrl) {
     // YouTube
     else if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) {
       const ytPath = path.join(__dirname, "../cookies_youtube.txt");
-      if (fs.existsSync(ytPath)) {
-        console.log("✅ Found specific cookie file: cookies_youtube.txt");
+      const ytTmpPath = path.join(os.tmpdir(), "cookies_youtube.txt");
+      
+      // Prioritize /tmp (user updates) over bundled files
+      if (fs.existsSync(ytTmpPath)) {
+        console.log("✅ Found updated cookie file: /tmp/cookies_youtube.txt");
+        rawCookies = fs.readFileSync(ytTmpPath, "utf8");
+      } else if (fs.existsSync(ytPath)) {
+        console.log("✅ Found bundled cookie file: cookies_youtube.txt");
         rawCookies = fs.readFileSync(ytPath, "utf8");
       } else if (process.env.YOUTUBE_COOKIES) {
         console.log("✅ Using YOUTUBE_COOKIES env var");
@@ -480,13 +492,22 @@ app.post("/api/transcribe", async (req, res) => {
     const prompt = `
       You are an expert transcriptionist and translator.
       Analyze the provided media file and follow these instructions strictly:
-      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
-      2. **Translation**: Translate the full transcription into ${targetLanguage || 'English'}. Ensure the translation is natural, accurate, and maintains the original tone.
-      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
+      1. **Transcription**: Transcribe the spoken audio accurately in its original language. 
+      2. **Translation**: Translate the transcription into ${targetLanguage || 'English'}. Ensure the translation is natural and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words).
+      
+      **Formatting Requirements (MANDATORY)**:
+      - You MUST format the "originalText" and "translatedText" for maximum readability.
+      - Break the text into paragraphs using double line breaks (\\n\\n).
+      - Each paragraph should contain 1-3 sentences or represent a single logical thought or speaker change.
+      - NEVER return a single block of text.
+      
+      **Structural Example**:
+      "This is the first paragraph.\\n\\nThis is the second paragraph after a logical break.\\n\\nThis is the third paragraph."
       
       Output MUST be a valid JSON object with these keys:
-      - "originalText": The verbatim transcription.
-      - "translatedText": The accurate translation.
+      - "originalText": The formatted transcription.
+      - "translatedText": The formatted translation.
       - "title": The descriptive title.
 
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
@@ -669,6 +690,46 @@ app.post("/api/transcribe", async (req, res) => {
     console.error("Transcription error:", error);
     res.write(JSON.stringify({ type: 'error', data: { message: error.message } }) + '\n');
     res.end();
+  }
+});
+
+// ---------- COOKIE UPDATE ENDPOINT ----------
+app.post("/api/cookies", (req, res) => {
+  const { platform, cookies } = req.body;
+
+  if (!platform || !cookies) {
+    return res.status(400).json({ error: "Missing platform or cookies" });
+  }
+
+  let filePath;
+  if (platform === "youtube") {
+    filePath = path.join(__dirname, "../cookies_youtube.txt");
+  } else if (platform === "instagram") {
+    filePath = path.join(__dirname, "../cookies_instagram.txt");
+  } else {
+    return res.status(400).json({ error: "Unsupported platform" });
+  }
+
+  try {
+    console.log(`💾 Attempting to save ${platform} cookies to: ${filePath}`);
+    fs.writeFileSync(filePath, cookies.trim() + "\n");
+    console.log(`✅ ${platform} cookies updated via web interface`);
+    res.json({ status: "success", message: `${platform} cookies updated` });
+  } catch (error) {
+    console.warn(`⚠️ Failed to write to project root (${error.message}), trying /tmp...`);
+    try {
+      const tmpPath = path.join(os.tmpdir(), path.basename(filePath));
+      fs.writeFileSync(tmpPath, cookies.trim() + "\n");
+      console.log(`✅ ${platform} cookies updated in temporary storage: ${tmpPath}`);
+      res.json({ status: "success", message: `${platform} cookies updated (Temporary Session Only)` });
+    } catch (tmpError) {
+      console.error("❌ Error saving cookies even to /tmp:", tmpError);
+      res.status(500).json({ 
+        error: "Failed to save cookies on server",
+        details: tmpError.message,
+        path: tmpError.path
+      });
+    }
   }
 });
 
