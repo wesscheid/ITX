@@ -521,7 +521,7 @@ app.post("/api/transcribe", async (req, res) => {
     const cookiePath = getCookiesPath(url); // Pass url to getCookiesPath
     
     // Construct extractor args with PO Token if available
-    let extractorArgs = "youtube:player_client=ios,web";
+    let extractorArgs = "youtube:player_client=web,ios";
     const poToken = getPoToken("ios");
     if (poToken) {
       extractorArgs += `;po_token=ios+${poToken}`;
