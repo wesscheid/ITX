@@ -90,7 +90,7 @@ const isWin = process.platform === "win32";
 const YTDLP_PATH = path.join(__dirname, "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
 
 // ---------- Health ----------
-app.get("/health", (req, res) => {
+app.get("/api/health", (req, res) => {
   const exists = fs.existsSync(YTDLP_PATH);
   let version = "missing";
   if (exists) {
