@@ -28,7 +28,9 @@ const PORT = process.env.PORT || 10000;
 // Initialize Firebase
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
-    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    const rawAccount = process.env.FIREBASE_SERVICE_ACCOUNT.trim();
+    // Support both single-line and multi-line JSON
+    const serviceAccount = JSON.parse(rawAccount);
     if (!admin.apps.length) {
       admin.initializeApp({
         credential: admin.credential.cert(serviceAccount)
@@ -104,7 +106,11 @@ app.get("/health", (req, res) => {
     ts: Date.now(),
     ytDlpAvailable: exists,
     ytDlpVersion: version,
-    ytDlpPath: YTDLP_PATH
+    ytDlpPath: YTDLP_PATH,
+    firebase: {
+      active: !!db,
+      initialized: admin.apps.length > 0
+    }
   });
 });
 
@@ -197,10 +203,10 @@ async function getCookiesPath(targetUrl) {
       
       // Prioritize /tmp (user updates) over bundled files
       if (fs.existsSync(ytTmpPath)) {
-        console.log("✅ Found updated cookie file: /tmp/cookies_youtube.txt");
+        console.log("✅ Found updated cookie file: /tmp/cookies_instagram.txt");
         rawCookies = fs.readFileSync(ytTmpPath, "utf8");
       } else if (fs.existsSync(ytPath)) {
-        console.log("✅ Found bundled cookie file: cookies_youtube.txt");
+        console.log("✅ Found bundled cookie file: cookies_instagram.txt");
         rawCookies = fs.readFileSync(ytPath, "utf8");
       } else if (process.env.YOUTUBE_COOKIES) {
         console.log("✅ Using YOUTUBE_COOKIES env var");
@@ -374,388 +380,242 @@ async function getCookiesPath(targetUrl) {
 
 // ---------- RESOLVE METADATA (Preview) ----------
 app.get("/api/resolve", async (req, res) => {
-  const { url } = req.query;
+  try {
+    const { url } = req.query;
 
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not installed" });
-  }
-
-  const cleanUrl = url.trim();
-
-  // Check cache
-  const cached = metadataCache.get(cleanUrl);
-  if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-    console.log('Serving from cache for', cleanUrl);
-    return res.json(cached.data);
-  }
-
-  const cookiePath = await getCookiesPath(cleanUrl); // Pass cleanUrl to getCookiesPath
-  const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
-
-  let extractorArgs = "";
-  if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) {
-    extractorArgs = '--extractor-args "youtube:player_client=ios,web"';
-    const poToken = getPoToken("ios");
-    if (poToken) {
-      extractorArgs = `--extractor-args "youtube:player_client=ios,web;po_token=ios+${poToken}"`;
-    }
-  }
-
-  // 1. Try to get direct URL first (faster for some sites)
-  const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" ${cookieArg} ${extractorArgs} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
-
-  exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
-    if (!err && stdout.trim()) {
-      // Success - we have a direct link
-      const data = {
-        type: "video",
-        can_preview: true,
-        preview_url: stdout.trim(), // Might be a direct video stream
-        download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
-        title: "Video Media" 
-      };
-      
-      // Try to get title/uploader separately if possible, but don't block
-      // Ideally we run -J for everything, but --get-url is faster for a quick preview check
-      
-      metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
-      return res.json(data);
+    if (!url) {
+      return res.status(400).json({ error: "Missing URL" });
     }
 
-    // 2. Fallback to full JSON metadata extraction (-J)
-    // This is robust but slower.
-    const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\"')}"`;
-    
-    exec(metaCmd, { maxBuffer: 50 * 1024 * 1024 }, (mErr, mOut) => {
-      if (mErr) {
-        const errorMsg = stderr || mErr.message;
-        console.error("Metadata error:", errorMsg);
+    if (!fs.existsSync(YTDLP_PATH)) {
+      return res.status(503).json({ error: "yt-dlp not installed" });
+    }
 
-        let frontendError = "Failed to resolve video";
-        // Check for common connection/blocking indicators in yt-dlp's stderr
-        if (errorMsg.includes("HTTP Error") || 
-            errorMsg.includes("Connection refused") ||
-            errorMsg.includes("blocked by") ||
-            errorMsg.includes("login required") ||
-            errorMsg.includes("Please provide --cookies") ||
-            errorMsg.includes("Unable to download webpage") ||
-            errorMsg.includes("No video formats found")) 
-        {
-          frontendError = "RESOLVER_CONNECTION_ERROR: Failed to resolve video, likely due to network or platform restrictions.";
-        }
-        return res
-          .status(500)
-          .json({ error: frontendError, details: errorMsg });
+    const cleanUrl = url.trim();
+
+    // Check cache
+    const cached = metadataCache.get(cleanUrl);
+    if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
+      console.log('Serving from cache for', cleanUrl);
+      return res.json(cached.data);
+    }
+
+    const cookiePath = await getCookiesPath(cleanUrl);
+    const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
+
+    let extractorArgs = "";
+    if (cleanUrl.includes("youtube.com") || cleanUrl.includes("youtu.be")) {
+      extractorArgs = '--extractor-args "youtube:player_client=ios,web"';
+      const poToken = getPoToken("ios");
+      if (poToken) {
+        extractorArgs = `--extractor-args "youtube:player_client=ios,web;po_token=ios+${poToken}"`;
       }
+    }
 
-      try {
-        const data = JSON.parse(mOut);
-        
-        // Find best format if not already in root
-        let previewUrl = data.url;
-        if (!previewUrl && data.formats) {
-           const best = data.formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').pop();
-           if (best) previewUrl = best.url;
-        }
+    // 1. Try to get direct URL first (faster for some sites)
+    const cmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Mobile/15E148 Safari/604.1" ${cookieArg} ${extractorArgs} --get-url -f "best[height<=720][vcodec!='none'][acodec!='none']/best" "${cleanUrl.replace(/"/g, '\"')}"`;
 
-        const responseData = {
+    exec(cmd, { timeout: 30000, maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (!err && stdout.trim()) {
+        const data = {
           type: "video",
-          can_preview: !!previewUrl,
-          preview_url: previewUrl || data.thumbnail || null,
+          can_preview: true,
+          preview_url: stdout.trim(),
           download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
-          username: data.uploader || data.channel || "unknown",
-          title: data.title || "Video Media",
-          is_youtube: data.extractor_key === 'Youtube',
-          duration: data.duration
+          title: "Video Media" 
         };
-
-        metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
-        res.json(responseData);
-      } catch (e) {
-        console.error("JSON parse error:", e);
-        res.status(500).json({ error: "Failed to parse video metadata" });
+        metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
+        return res.json(data);
       }
+
+      // 2. Fallback to full JSON metadata extraction (-J)
+      const metaCmd = `"${YTDLP_PATH}" --user-agent "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" ${cookieArg} -J "${cleanUrl.replace(/"/g, '\"')}"`;
+      
+      exec(metaCmd, { maxBuffer: 50 * 1024 * 1024 }, (mErr, mOut) => {
+        if (mErr) {
+          const errorMsg = stderr || mErr.message;
+          console.error("Metadata error:", errorMsg);
+          return res.status(500).json({ error: "Failed to resolve video", details: errorMsg });
+        }
+
+        try {
+          const data = JSON.parse(mOut);
+          let previewUrl = data.url;
+          if (!previewUrl && data.formats) {
+            const best = data.formats.filter(f => f.vcodec !== 'none' && f.acodec !== 'none').pop();
+            if (best) previewUrl = best.url;
+          }
+
+          const responseData = {
+            type: "video",
+            can_preview: !!previewUrl,
+            preview_url: previewUrl || data.thumbnail || null,
+            download_url: `/api/download?url=${encodeURIComponent(cleanUrl)}`,
+            username: data.uploader || data.channel || "unknown",
+            title: data.title || "Video Media",
+            is_youtube: data.extractor_key === 'Youtube',
+            duration: data.duration
+          };
+
+          metadataCache.set(cleanUrl, { data: responseData, timestamp: Date.now() });
+          res.json(responseData);
+        } catch (e) {
+          res.status(500).json({ error: "Failed to parse video metadata" });
+        }
+      });
     });
-  });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // ---------- DOWNLOAD CONTENT ----------
 app.get("/api/download", async (req, res) => {
-  const { url, title } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: "Missing URL" });
-  }
-
-  if (!fs.existsSync(YTDLP_PATH)) {
-    return res.status(503).json({ error: "yt-dlp not available" });
-  }
-
-  const baseName = title ? title.toString() : "video";
-  const filename = safeFileName(baseName, ".mp4");
-  
-  res.setHeader(
-    "Content-Disposition",
-    `attachment; filename="${filename}"`
-  );
-  res.setHeader("Content-Type", "video/mp4");
-
-  const cookiePath = await getCookiesPath(url); // Pass url to getCookiesPath
-  const args = [
-    "--user-agent",
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
-    "-f",
-    "best[height<=720][ext=mp4]/best[ext=mp4]/best",
-    "--merge-output-format",
-    "mp4",
-    "--recode-video",
-    "mp4",
-    "--postprocessor-args",
-    "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
-    "-o",
-    "-",
-    url
-  ];
-
-  if (cookiePath) {
-    args.unshift("--cookies", cookiePath);
-  }
-
-  const child = spawn(YTDLP_PATH, args);
-  child.stdout.pipe(res);
-  
-  child.stderr.on("data", (d) => {
-    // Only log significant errors/warnings to avoid clutter
-    const msg = d.toString();
-    if (msg.toLowerCase().includes('error')) {
-      console.error("DL Error:", msg);
-    }
-  });
-
-  child.on("error", (e) => {
-    console.error("Spawn error:", e);
-    if (!res.headersSent) res.status(500).end();
-  });
-  
-  child.on("close", (code) => {
-    if (code !== 0) console.error("Download process exited with code:", code);
-    if (!res.headersSent) res.end();
-  });
-});
-
-// ---------- TRANSCRIBE & TRANSLATE (Streaming Progress) ----------
-app.post("/api/transcribe", async (req, res) => {
-  const { url, targetLanguage } = req.body;
-  if (!url) return res.status(400).json({ error: "Missing URL" });
-
-  // Set headers for streaming response (NDJSON)
-  res.setHeader('Content-Type', 'application/x-ndjson');
-  res.setHeader('Transfer-Encoding', 'chunked');
-
   try {
-    const prompt = `
-      You are an expert transcriptionist and translator.
-      Analyze the provided media file and follow these instructions strictly:
-      1. **Transcription**: Transcribe the spoken audio accurately in its original language. 
-      2. **Translation**: Translate the transcription into ${targetLanguage || 'English'}. Ensure the translation is natural and maintains the original tone.
-      3. **Title**: Create a concise, descriptive title (max 5-7 words).
-      
-      **Formatting Requirements (MANDATORY)**:
-      - You MUST format the "originalText" and "translatedText" for maximum readability.
-      - Break the text into paragraphs using double line breaks (\\n\\n).
-      - Each paragraph should contain 1-3 sentences or represent a single logical thought or speaker change.
-      - NEVER return a single block of text.
-      
-      **Structural Example**:
-      "This is the first paragraph.\\n\\nThis is the second paragraph after a logical break.\\n\\nThis is the third paragraph."
-      
-      Output MUST be a valid JSON object with these keys:
-      - "originalText": The formatted transcription.
-      - "translatedText": The formatted translation.
-      - "title": The descriptive title.
+    const { url, title } = req.query;
 
-      If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
-    `;
-
-
-
-
-    // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
-    console.log("Fetching bytes for platform:", url);
-    const cookiePath = await getCookiesPath(url); // Pass url to getCookiesPath
-    
-    // Construct extractor args with PO Token if available
-    let extractorArgs = "youtube:player_client=web,ios";
-    const poToken = getPoToken("ios");
-    if (poToken) {
-      extractorArgs += `;po_token=ios+${poToken}`;
+    if (!url) {
+      return res.status(400).json({ error: "Missing URL" });
     }
 
-    // Get yt-dlp version for system info
-    let ytDlpVersion = "unknown";
-    try {
-      ytDlpVersion = require("child_process").execSync(`"${YTDLP_PATH}" --version`).toString().trim();
-    } catch (e) {}
+    if (!fs.existsSync(YTDLP_PATH)) {
+      return res.status(503).json({ error: "yt-dlp not available" });
+    }
 
-    // Send initial system info
-    res.write(JSON.stringify({ type: 'log', message: `System Online | Core: yt-dlp ${ytDlpVersion}` }) + '\n');
+    const baseName = title ? title.toString() : "video";
+    const filename = safeFileName(baseName, ".mp4");
+    
+    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+    res.setHeader("Content-Type", "video/mp4");
 
-    const ytDlpArgs = [
-      "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
-      "--no-playlist",
-      "--js-runtimes", "deno",
-      "--js-runtimes", "node",
-      "--extractor-args", extractorArgs,
-      "--user-agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-      "-o", "-",
+    const cookiePath = await getCookiesPath(url);
+    const args = [
+      "--user-agent",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
+      "-f",
+      "best[height<=720][ext=mp4]/best[ext=mp4]/best",
+      "--merge-output-format",
+      "mp4",
+      "--recode-video",
+      "mp4",
+      "--postprocessor-args",
+      "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
+      "-o",
+      "-",
       url
     ];
 
     if (cookiePath) {
-      ytDlpArgs.unshift("--cookies", cookiePath);
+      args.unshift("--cookies", cookiePath);
     }
 
-    const fullCommand = `yt-dlp ${ytDlpArgs.join(" ")}`;
-    res.write(JSON.stringify({ type: 'log', message: `Running command: '${fullCommand}'` }) + '\n');
-
-    const child = spawn(YTDLP_PATH, ytDlpArgs, {
-      env: { ...process.env }
+    const child = spawn(YTDLP_PATH, args);
+    child.stdout.pipe(res);
+    
+    child.on("error", (e) => {
+      if (!res.headersSent) res.status(500).end();
     });
+    
+    child.on("close", (code) => {
+      if (!res.headersSent) res.end();
+    });
+  } catch (e) {
+    if (!res.headersSent) res.status(500).json({ error: e.message });
+  }
+});
+
+// ---------- TRANSCRIBE & TRANSLATE (Streaming Progress) ----------
+app.post("/api/transcribe", async (req, res) => {
+  try {
+    const { url, targetLanguage } = req.body;
+    if (!url) return res.status(400).json({ error: "Missing URL" });
+
+    res.setHeader('Content-Type', 'application/x-ndjson');
+    res.setHeader('Transfer-Encoding', 'chunked');
+
+    const prompt = `
+      You are an expert transcriptionist and translator.
+      Analyze the provided media file and follow these instructions strictly:
+      1. Transcription: Transcribe the spoken audio accurately in its original language. 
+      2. Translation: Translate the transcription into ${targetLanguage || 'English'}.
+      3. Title: Create a concise title.
+      
+      Format with double line breaks for readability.
+      Output MUST be a valid JSON object with keys: originalText, translatedText, title.
+    `;
+
+    console.log("Fetching bytes for platform:", url);
+    const cookiePath = await getCookiesPath(url);
+    
+    let extractorArgs = "youtube:player_client=web,ios";
+    const poToken = getPoToken("ios");
+    if (poToken) extractorArgs += `;po_token=ios+${poToken}`;
+
+    const ytDlpArgs = [
+      "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
+      "--no-playlist",
+      "--extractor-args", extractorArgs,
+      "-o", "-",
+      url
+    ];
+
+    if (cookiePath) ytDlpArgs.unshift("--cookies", cookiePath);
+
+    const child = spawn(YTDLP_PATH, ytDlpArgs);
     let chunks = [];
     let stderrData = "";
-    let totalLength = 0;
     
-    // Parse progress and logs from stderr
     child.stderr.on("data", (data) => {
       const text = data.toString();
       stderrData += text;
-      
-      // Send raw log to frontend
       text.split('\n').forEach(line => {
-        if (line.trim()) {
-          res.write(JSON.stringify({ type: 'log', message: line.trim() }) + '\n');
-        }
+        if (line.trim()) res.write(JSON.stringify({ type: 'log', message: line.trim() }) + '\n');
       });
-
-      // Extract percentage: [download]  23.5% of ...
-      const match = text.match(/\[download\]\s+(\d+\.\d+)%/);
-      if (match && match[1]) {
-        const percent = parseFloat(match[1]);
-        res.write(JSON.stringify({ type: 'progress', value: percent, stage: 'downloading' }) + '\n');
-      }
     });
 
-    child.stdout.on("data", (chunk) => {
-      chunks.push(chunk);
-      totalLength += chunk.length;
-      // Safety: limit to 20MB for inlineData to avoid payload limits
-      if (totalLength > 20 * 1024 * 1024) {
-        console.warn("File too large, truncating at 20MB");
-        child.kill();
-      }
-    });
+    child.stdout.on("data", (chunk) => chunks.push(chunk));
 
     child.on("close", async (code) => {
       try {
         const buffer = Buffer.concat(chunks);
         if (buffer.length === 0) {
-          console.error("Buffer is empty after yt-dlp. Exit code:", code);
-          console.error("yt-dlp stderr output:", stderrData);
-          const details = stderrData;
-          let frontendErrorMsg = "Failed to fetch media bytes.";
-          
-          if (details.includes("Sign in to confirm you’re not a bot") || details.includes("cookies are no longer valid")) {
-            frontendErrorMsg = "YOUTUBE_COOKIE_EXPIRED: Your YouTube session cookies have expired or been rotated. Please update cookies_youtube.txt with a fresh export from your browser.";
-          } else if (details.includes("HTTP Error") || 
-              details.includes("Connection refused") ||
-              details.includes("blocked by") ||
-              details.includes("login required") ||
-              details.includes("Please provide --cookies") ||
-              details.includes("Unable to download webpage") ||
-              details.includes("No video formats found")) 
-          {
-            frontendErrorMsg = "RESOLVER_CONNECTION_ERROR: Failed to fetch media bytes, likely due to network or platform restrictions.";
-          }
-          const errorMsg = { error: frontendErrorMsg, details: details };
-          res.write(JSON.stringify({ type: 'error', data: errorMsg }) + '\n');
+          res.write(JSON.stringify({ type: 'error', data: { error: "Failed to fetch media bytes", details: stderrData } }) + '\n');
           return res.end();
         }
-        if (code !== 0) {
-          console.error(`yt-dlp exited with non-zero code ${code}`);
-          console.error("yt-dlp stderr:", stderrData);
-          return res.status(500).json({
-            error: `yt-dlp failed with exit code ${code}.`,
-            details: stderrData
-          });
-        }
 
-        // Notify frontend: Download complete, starting AI
-        res.write(JSON.stringify({ type: 'status', message: 'Processing audio with Gemini...' }) + '\n');
+        res.write(JSON.stringify({ type: 'status', message: 'Processing with Gemini...' }) + '\n');
 
-        console.log(`Sending ${buffer.length} bytes to Gemini...`);
-        let response;
-        try {
-          response = await genAI.models.generateContent({
-            model: "gemini-2.5-flash", 
-            contents: {
-              parts: [
-                {
-                  inlineData: {
-                    data: buffer.toString("base64"),
-                    mimeType: "audio/mp4"
-                  }
-                },
-                {
-                  text: prompt
-                }
-              ]
-            },
-            config: {
-              responseMimeType: "application/json",
-              responseSchema: {
-                type: Type.OBJECT,
-                properties: {
-                  originalText: { type: Type.STRING },
-                  translatedText: { type: Type.STRING },
-                  title: { type: Type.STRING },
-                },
-                required: ["originalText", "translatedText", "title"],
+        const response = await genAI.models.generateContent({
+          model: "gemini-2.5-flash", 
+          contents: {
+            parts: [
+              { inlineData: { data: buffer.toString("base64"), mimeType: "audio/mp4" } },
+              { text: prompt }
+            ]
+          },
+          config: {
+            responseMimeType: "application/json",
+            responseSchema: {
+              type: Type.OBJECT,
+              properties: {
+                originalText: { type: Type.STRING },
+                translatedText: { type: Type.STRING },
+                title: { type: Type.STRING },
               },
-            }
-          });
-        } catch (initialErr) {
-            console.error("Gemini API Error:", initialErr);
-            throw initialErr;
-        }
+              required: ["originalText", "translatedText", "title"],
+            },
+          }
+        });
         
-        if (!response.text) {
-          throw new Error("Gemini returned empty response");
-        }
-
-        // Send Final Result
         const resultData = JSON.parse(response.text);
         res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
         res.end();
-
       } catch (geminiErr) {
-        console.error("Gemini processing error:", geminiErr);
         res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message } }) + '\n');
         res.end();
       }
     });
-
-    child.on("error", (e) => {
-      console.error("Spawn error:", e);
-      res.write(JSON.stringify({ type: 'error', data: { message: "Failed to start downloader process" } }) + '\n');
-      res.end();
-    });
-
   } catch (error) {
-    console.error("Transcription error:", error);
     res.write(JSON.stringify({ type: 'error', data: { message: error.message } }) + '\n');
     res.end();
   }
@@ -763,57 +623,55 @@ app.post("/api/transcribe", async (req, res) => {
 
 // ---------- COOKIE UPDATE ENDPOINT ----------
 app.post("/api/cookies", async (req, res) => {
-  const { platform, cookies } = req.body;
-
-  if (!platform || !cookies) {
-    return res.status(400).json({ error: "Missing platform or cookies" });
-  }
-
-  // 1. Save to Firestore (Primary Persistent Store)
-  const firestoreSaved = await saveCookiesToFirestore(platform, cookies);
-  if (firestoreSaved) {
-    console.log(`✅ ${platform} cookies persisted to Firestore`);
-  }
-
-  // 2. Fallback: Save to Local File (for immediate use or if no Firestore)
-  let filePath;
-  if (platform === "youtube") {
-    filePath = path.join(__dirname, "../cookies_youtube.txt");
-  } else if (platform === "instagram") {
-    filePath = path.join(__dirname, "../cookies_instagram.txt");
-  } else if (platform === "twitter") {
-    filePath = path.join(__dirname, "../cookies_twitter.txt");
-  } else {
-    return res.status(400).json({ error: "Unsupported platform" });
-  }
-
   try {
-    console.log(`💾 Attempting to save ${platform} cookies to: ${filePath}`);
-    fs.writeFileSync(filePath, cookies.trim() + "\n");
-    console.log(`✅ ${platform} cookies updated via web interface`);
-    res.json({ 
-      status: "success", 
-      message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "locally"}` 
-    });
-  } catch (error) {
-    console.warn(`⚠️ Failed to write to project root (${error.message}), trying /tmp...`);
+    const { platform, cookies } = req.body;
+
+    if (!platform || !cookies) {
+      return res.status(400).json({ error: "Missing platform or cookies" });
+    }
+
+    // 1. Save to Firestore (Primary Persistent Store)
+    let firestoreSaved = false;
     try {
-      const tmpPath = path.join(os.tmpdir(), path.basename(filePath));
-      fs.writeFileSync(tmpPath, cookies.trim() + "\n");
-      console.log(`✅ ${platform} cookies updated in temporary storage: ${tmpPath}`);
+      firestoreSaved = await saveCookiesToFirestore(platform, cookies);
+      if (firestoreSaved) console.log(`✅ ${platform} cookies persisted to Firestore`);
+    } catch (fsErr) {
+      console.error("Firestore save error:", fsErr.message);
+    }
+
+    // 2. Fallback: Save to Local File
+    let filePath;
+    if (platform === "youtube") filePath = path.join(__dirname, "../cookies_youtube.txt");
+    else if (platform === "instagram") filePath = path.join(__dirname, "../cookies_instagram.txt");
+    else if (platform === "twitter") filePath = path.join(__dirname, "../cookies_twitter.txt");
+    else return res.status(400).json({ error: "Unsupported platform" });
+
+    try {
+      fs.writeFileSync(filePath, cookies.trim() + "\n");
       res.json({ 
         status: "success", 
-        message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "(Temporary Session Only)"}` 
+        message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "locally"}` 
       });
-    } catch (tmpError) {
-      console.error("❌ Error saving cookies even to /tmp:", tmpError);
-      res.status(500).json({ 
-        error: "Failed to save cookies on server",
-        details: tmpError.message,
-        path: tmpError.path,
-        firestoreSuccess: firestoreSaved
-      });
+    } catch (error) {
+      try {
+        const tmpPath = path.join(os.tmpdir(), path.basename(filePath));
+        fs.writeFileSync(tmpPath, cookies.trim() + "\n");
+        res.json({ 
+          status: "success", 
+          message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "(Temporary Session Only)"}` 
+        });
+      } catch (tmpError) {
+        res.status(firestoreSaved ? 200 : 500).json({ 
+          status: firestoreSaved ? "success" : "error",
+          message: firestoreSaved ? "Saved to Firestore but failed local cache" : "Failed to save cookies",
+          details: tmpError.message,
+          firestoreSuccess: firestoreSaved
+        });
+      }
     }
+  } catch (globalErr) {
+    console.error("CRITICAL ERROR in /api/cookies:", globalErr);
+    res.status(500).json({ error: "Internal Server Error", details: globalErr.message });
   }
 });
 
