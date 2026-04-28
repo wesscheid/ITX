@@ -29,10 +29,12 @@ const PORT = process.env.PORT || 10000;
 if (process.env.FIREBASE_SERVICE_ACCOUNT) {
   try {
     const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
-    admin.initializeApp({
-      credential: admin.credential.cert(serviceAccount)
-    });
-    console.log("🔥 Firebase Admin initialized");
+    if (!admin.apps.length) {
+      admin.initializeApp({
+        credential: admin.credential.cert(serviceAccount)
+      });
+      console.log("🔥 Firebase Admin initialized");
+    }
   } catch (e) {
     console.error("❌ Failed to initialize Firebase:", e.message);
   }
