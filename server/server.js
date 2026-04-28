@@ -20,9 +20,27 @@ const express = require("express");
 const cors = require("cors");
 const { exec, spawn } = require("child_process");
 const { GoogleGenAI, Type } = require("@google/genai");
+const admin = require("firebase-admin");
 
 const app = express();
 const PORT = process.env.PORT || 10000;
+
+// Initialize Firebase
+if (process.env.FIREBASE_SERVICE_ACCOUNT) {
+  try {
+    const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+    admin.initializeApp({
+      credential: admin.credential.cert(serviceAccount)
+    });
+    console.log("🔥 Firebase Admin initialized");
+  } catch (e) {
+    console.error("❌ Failed to initialize Firebase:", e.message);
+  }
+} else {
+  console.log("⚠️ FIREBASE_SERVICE_ACCOUNT not found, skipping persistence");
+}
+
+const db = admin.apps.length > 0 ? admin.firestore() : null;
 
 // Initialize Gemini
 const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
@@ -33,6 +51,35 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+
+// ---------- Firestore Helpers ----------
+async function getCookiesFromFirestore(platform) {
+  if (!db) return null;
+  try {
+    const doc = await db.collection("settings").doc("cookies").get();
+    if (doc.exists) {
+      const data = doc.data();
+      return data[platform] || null;
+    }
+  } catch (e) {
+    console.error(`Error fetching ${platform} cookies from Firestore:`, e.message);
+  }
+  return null;
+}
+
+async function saveCookiesToFirestore(platform, cookies) {
+  if (!db) return false;
+  try {
+    await db.collection("settings").doc("cookies").set({
+      [platform]: cookies,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp()
+    }, { merge: true });
+    return true;
+  } catch (e) {
+    console.error(`Error saving ${platform} cookies to Firestore:`, e.message);
+    return false;
+  }
+}
 
 // ---------- yt-dlp PATH ----------
 const isWin = process.platform === "win32";
@@ -83,19 +130,39 @@ function getPoToken(client = "ios") {
 }
 
 // ---------- Cookies Helper ----------
-function getCookiesPath(targetUrl) {
+async function getCookiesPath(targetUrl) {
   let rawCookies = null;
   const secretPath = "/etc/secrets/cookies.txt"; // Generic render secret
   
-  // Domain-specific checks
-  if (targetUrl) {
+  // 1. Try Firestore First (Persistent)
+  if (targetUrl && db) {
+    const lowerUrl = targetUrl.toLowerCase();
+    let platform = null;
+    if (lowerUrl.includes("x.com") || lowerUrl.includes("twitter.com")) platform = "twitter";
+    else if (lowerUrl.includes("instagram.com")) platform = "instagram";
+    else if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) platform = "youtube";
+
+    if (platform) {
+      console.log(`🔍 Checking Firestore for ${platform} cookies...`);
+      rawCookies = await getCookiesFromFirestore(platform);
+      if (rawCookies) console.log(`✅ Found ${platform} cookies in Firestore`);
+    }
+  }
+
+  // 2. Fallback to Local/Env if not in Firestore
+  if (!rawCookies && targetUrl) {
     const lowerUrl = targetUrl.toLowerCase();
     
     // X / Twitter
     if (lowerUrl.includes("x.com") || lowerUrl.includes("twitter.com")) {
-      const xPath = path.join(__dirname, "../cookie_x.txt");
-      if (fs.existsSync(xPath)) {
-        console.log("✅ Found specific cookie file: cookie_x.txt");
+      const xPath = path.join(__dirname, "../cookies_twitter.txt");
+      const xTmpPath = path.join(os.tmpdir(), "cookies_twitter.txt");
+
+      if (fs.existsSync(xTmpPath)) {
+        console.log("✅ Found updated cookie file: /tmp/cookies_twitter.txt");
+        rawCookies = fs.readFileSync(xTmpPath, "utf8");
+      } else if (fs.existsSync(xPath)) {
+        console.log("✅ Found bundled cookie file: cookies_twitter.txt");
         rawCookies = fs.readFileSync(xPath, "utf8");
       } else if (process.env.TWITTER_COOKIES) {
         console.log("✅ Using TWITTER_COOKIES env var");
@@ -152,7 +219,6 @@ function getCookiesPath(targetUrl) {
       }
     }
 
-    // Removed the generic IG_COOKIES fallback here as it was causing issues.
     // 2. Generic cookies.txt/.env in root
     if (!rawCookies) {
       const rootCookiesTxt = path.join(__dirname, "../cookies.txt");
@@ -305,7 +371,7 @@ function getCookiesPath(targetUrl) {
 // ======================================================
 
 // ---------- RESOLVE METADATA (Preview) ----------
-app.get("/api/resolve", (req, res) => {
+app.get("/api/resolve", async (req, res) => {
   const { url } = req.query;
 
   if (!url) {
@@ -325,7 +391,7 @@ app.get("/api/resolve", (req, res) => {
     return res.json(cached.data);
   }
 
-  const cookiePath = getCookiesPath(cleanUrl); // Pass cleanUrl to getCookiesPath
+  const cookiePath = await getCookiesPath(cleanUrl); // Pass cleanUrl to getCookiesPath
   const cookieArg = cookiePath ? `--cookies "${cookiePath}"` : "";
 
   let extractorArgs = "";
@@ -354,7 +420,7 @@ app.get("/api/resolve", (req, res) => {
       // Try to get title/uploader separately if possible, but don't block
       // Ideally we run -J for everything, but --get-url is faster for a quick preview check
       
-      metadataCache.set(cleanUrl, { data, timestamp: Date.Now() });
+      metadataCache.set(cleanUrl, { data, timestamp: Date.now() });
       return res.json(data);
     }
 
@@ -416,7 +482,7 @@ app.get("/api/resolve", (req, res) => {
 });
 
 // ---------- DOWNLOAD CONTENT ----------
-app.get("/api/download", (req, res) => {
+app.get("/api/download", async (req, res) => {
   const { url, title } = req.query;
 
   if (!url) {
@@ -436,7 +502,7 @@ app.get("/api/download", (req, res) => {
   );
   res.setHeader("Content-Type", "video/mp4");
 
-  const cookiePath = getCookiesPath(url); // Pass url to getCookiesPath
+  const cookiePath = await getCookiesPath(url); // Pass url to getCookiesPath
   const args = [
     "--user-agent",
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
@@ -518,7 +584,7 @@ app.post("/api/transcribe", async (req, res) => {
 
     // Fetch bytes via yt-dlp (Using audio-only for speed and reliability)
     console.log("Fetching bytes for platform:", url);
-    const cookiePath = getCookiesPath(url); // Pass url to getCookiesPath
+    const cookiePath = await getCookiesPath(url); // Pass url to getCookiesPath
     
     // Construct extractor args with PO Token if available
     let extractorArgs = "youtube:player_client=web,ios";
@@ -694,18 +760,27 @@ app.post("/api/transcribe", async (req, res) => {
 });
 
 // ---------- COOKIE UPDATE ENDPOINT ----------
-app.post("/api/cookies", (req, res) => {
+app.post("/api/cookies", async (req, res) => {
   const { platform, cookies } = req.body;
 
   if (!platform || !cookies) {
     return res.status(400).json({ error: "Missing platform or cookies" });
   }
 
+  // 1. Save to Firestore (Primary Persistent Store)
+  const firestoreSaved = await saveCookiesToFirestore(platform, cookies);
+  if (firestoreSaved) {
+    console.log(`✅ ${platform} cookies persisted to Firestore`);
+  }
+
+  // 2. Fallback: Save to Local File (for immediate use or if no Firestore)
   let filePath;
   if (platform === "youtube") {
     filePath = path.join(__dirname, "../cookies_youtube.txt");
   } else if (platform === "instagram") {
     filePath = path.join(__dirname, "../cookies_instagram.txt");
+  } else if (platform === "twitter") {
+    filePath = path.join(__dirname, "../cookies_twitter.txt");
   } else {
     return res.status(400).json({ error: "Unsupported platform" });
   }
@@ -714,20 +789,27 @@ app.post("/api/cookies", (req, res) => {
     console.log(`💾 Attempting to save ${platform} cookies to: ${filePath}`);
     fs.writeFileSync(filePath, cookies.trim() + "\n");
     console.log(`✅ ${platform} cookies updated via web interface`);
-    res.json({ status: "success", message: `${platform} cookies updated` });
+    res.json({ 
+      status: "success", 
+      message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "locally"}` 
+    });
   } catch (error) {
     console.warn(`⚠️ Failed to write to project root (${error.message}), trying /tmp...`);
     try {
       const tmpPath = path.join(os.tmpdir(), path.basename(filePath));
       fs.writeFileSync(tmpPath, cookies.trim() + "\n");
       console.log(`✅ ${platform} cookies updated in temporary storage: ${tmpPath}`);
-      res.json({ status: "success", message: `${platform} cookies updated (Temporary Session Only)` });
+      res.json({ 
+        status: "success", 
+        message: `${platform} cookies updated ${firestoreSaved ? "persistently (Firestore)" : "(Temporary Session Only)"}` 
+      });
     } catch (tmpError) {
       console.error("❌ Error saving cookies even to /tmp:", tmpError);
       res.status(500).json({ 
         error: "Failed to save cookies on server",
         details: tmpError.message,
-        path: tmpError.path
+        path: tmpError.path,
+        firestoreSuccess: firestoreSaved
       });
     }
   }

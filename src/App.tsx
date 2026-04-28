@@ -5,6 +5,7 @@ import UrlInput from './components/UrlInput';
 import ProcessingState from './components/ProcessingState';
 import ResultCard from './components/ResultCard';
 import LogConsole from './components/LogConsole';
+import SettingsModal from './components/SettingsModal';
 import { SUPPORTED_LANGUAGES, AppStatus, ProcessingResult, ProcessingProgress } from './types';
 import { fileToBase64, validateFile, processFileInChunks, chunksToBlob } from './utils/fileHelpers';
 import { translateVideo, translateVideoStream, transcribeUrl } from './services/geminiService';
@@ -17,6 +18,7 @@ const App: React.FC = () => {
   const [result, setResult] = useState<ProcessingResult | null>(null);
   const [errorMsg, setErrorMsg] = useState<DownloaderError | null>(null);
   const [isDark, setIsDark] = useState<boolean>(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [progress, setProgress] = useState<ProcessingProgress>({
     stage: 'downloading',
     percentage: 0,
@@ -192,7 +194,7 @@ const App: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 dark:bg-slate-900 flex flex-col items-center py-12 px-4 sm:px-6 lg:px-8 transition-colors duration-300">
       <div className="w-full max-w-4xl space-y-8">
-        <Header isDark={isDark} toggleTheme={toggleTheme} />
+        <Header isDark={isDark} toggleTheme={toggleTheme} onOpenSettings={() => setIsSettingsOpen(true)} />
 
         <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl shadow-xl border border-slate-100 dark:border-slate-700 transition-colors duration-300">
           
@@ -332,6 +334,7 @@ const App: React.FC = () => {
           <p className="text-xs mt-1 opacity-75">v{import.meta.env.VITE_APP_VERSION}</p>
         </footer>
       </div>
+      <SettingsModal isOpen={isSettingsOpen} onClose={() => setIsSettingsOpen(false)} />
     </div>
   );
 };

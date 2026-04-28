@@ -75,23 +75,26 @@ The application can also be deployed to Vercel.
 -   **Note:** Vercel automatically runs `npm install` in the `server` directory, which triggers the `postinstall` script (`node downloadBinaries.js`) to download `yt-dlp` and `ffmpeg`.
 
 ## 6. Key Features
--   **Multi-Platform Downloader:** Reliable downloading via `yt-dlp` backend (expanding beyond Instagram).
--   **AI Transcription:** Fast, multimodal transcription using Gemini Flash 2.5.
--   **Share/Keep Integration:** "Share" button using `navigator.share` API for mobile integration with Google Keep/Notes.
--   **Dark Mode:** System-preference aware Tailwind dark mode.
--   **Version Display:** Current application version displayed in the frontend footer.
+- **Multi-Platform Downloader**: Reliable downloading via `yt-dlp` backend.
+- **AI Transcription**: Fast, multimodal transcription using Gemini Flash 2.5 with **enforced readable paragraph formatting**.
+- **Cookie Management UI**: Hidden "System Settings" modal (accessible via gear icon in Header) allowing real-time, no-redeploy updates to YouTube, Instagram, and X (Twitter) cookies.
+- **Persistent Cookie Storage**: Supports **Firebase Firestore** for persistent cookie storage. If `FIREBASE_SERVICE_ACCOUNT` is provided as an environment variable, cookies updated via the UI are saved to Firestore and survive server restarts/redeployments. If Firebase is not configured, the system falls back to temporary local storage.
+- **Share/Keep Integration**: "Share" button using `navigator.share` API.
+- **Dark Mode**: System-preference aware Tailwind dark mode.
+- **Version Display**: Current application version displayed in the frontend footer.
 
 ## 7. File Structure
--   `App.tsx`: Main logic controller.
--   `server/`:
-    -   `server.js`: Express backend handling API and Static files.
-    -   `downloadBinaries.js`: Node.js script for downloading `yt-dlp` and `ffmpeg`.
-    -   `bin/`: Contains `ffmpeg` and `yt-dlp` binaries.
--   `services/`:
-    -   `videoDownloaderService.ts`: Fetches from local/deployed backend.
-    -   `geminiService.ts`: AI interaction logic.
--   `components/`:
-    -   `UrlInput.tsx`, `ResultCard.tsx`, etc.
+- `App.tsx`: Main logic controller and state management.
+- `server/`:
+    - `server.js`: Express backend handling API, Static files, and **Cookie Management API (`POST /api/cookies`)**.
+    - `downloadBinaries.js`: Node.js script for downloading `yt-dlp` and `ffmpeg`.
+    - `bin/`: Contains `ffmpeg` and `yt-dlp` binaries.
+- `services/`:
+    - `videoDownloaderService.ts`: Fetches from local/deployed backend.
+    - `geminiService.ts`: AI interaction logic with **strictly structured readable prompts**.
+- `components/`:
+    - `UrlInput.tsx`, `ResultCard.tsx`, `SettingsModal.tsx` (Cookie management), etc.
+
 -   `gemini.md`: Project Context.
 
 ## 8. Development Configuration

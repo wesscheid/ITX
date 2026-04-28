@@ -15,13 +15,22 @@ export const translateVideo = async (
     const prompt = `
       You are an expert transcriptionist and translator.
       Analyze the provided media file and follow these instructions strictly:
-      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
-      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
-      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
+      1. **Transcription**: Transcribe the spoken audio accurately in its original language. 
+      2. **Translation**: Translate the transcription into ${targetLanguage}. Ensure the translation is natural and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words).
+      
+      **Formatting Requirements (MANDATORY)**:
+      - You MUST format the "originalText" and "translatedText" for maximum readability.
+      - Break the text into paragraphs using double line breaks (\\n\\n).
+      - Each paragraph should contain 1-3 sentences or represent a single logical thought or speaker change.
+      - NEVER return a single block of text.
+      
+      **Structural Example**:
+      "This is the first paragraph.\\n\\nThis is the second paragraph after a logical break.\\n\\nThis is the third paragraph."
       
       Output MUST be a valid JSON object with these keys:
-      - "originalText": The verbatim transcription.
-      - "translatedText": The accurate translation.
+      - "originalText": The formatted transcription.
+      - "translatedText": The formatted translation.
       - "title": The descriptive title.
 
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
@@ -86,13 +95,22 @@ export const translateVideoStream = async (
     const prompt = `
       You are an expert transcriptionist and translator.
       Analyze the provided media file and follow these instructions strictly:
-      1. **Transcription**: Transcribe the spoken audio verbatim in its original language. Include all spoken content accurately.
-      2. **Translation**: Translate the full transcription into ${targetLanguage}. Ensure the translation is natural, accurate, and maintains the original tone.
-      3. **Title**: Create a concise, descriptive title (max 5-7 words) for the content.
+      1. **Transcription**: Transcribe the spoken audio accurately in its original language. 
+      2. **Translation**: Translate the transcription into ${targetLanguage}. Ensure the translation is natural and maintains the original tone.
+      3. **Title**: Create a concise, descriptive title (max 5-7 words).
+      
+      **Formatting Requirements (MANDATORY)**:
+      - You MUST format the "originalText" and "translatedText" for maximum readability.
+      - Break the text into paragraphs using double line breaks (\\n\\n).
+      - Each paragraph should contain 1-3 sentences or represent a single logical thought or speaker change.
+      - NEVER return a single block of text.
+      
+      **Structural Example**:
+      "This is the first paragraph.\\n\\nThis is the second paragraph after a logical break.\\n\\nThis is the third paragraph."
       
       Output MUST be a valid JSON object with these keys:
-      - "originalText": The verbatim transcription.
-      - "translatedText": The accurate translation.
+      - "originalText": The formatted transcription.
+      - "translatedText": The formatted translation.
       - "title": The descriptive title.
 
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
