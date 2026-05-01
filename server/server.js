@@ -3,9 +3,13 @@ const path = require("path");
 const os = require("os");
 const fs = require("fs");
 
-// Add Deno to PATH if it exists (CRITICAL for YouTube on Vercel/Render)
-const localDenoPath = path.join(__dirname, "bin", "deno", "bin");
+// Add Deno and Binaries to PATH if they exist (CRITICAL for YouTube on Vercel/Render)
+const binPath = path.join(__dirname, "bin");
+const localDenoPath = path.join(binPath, "deno", "bin");
 const homeDenoPath = path.join(os.homedir(), ".deno", "bin");
+
+// Prioritize our bundled bin directory (for ffmpeg and yt-dlp)
+process.env.PATH = `${binPath}${path.delimiter}${process.env.PATH}`;
 
 if (fs.existsSync(localDenoPath)) {
   process.env.PATH = `${localDenoPath}${path.delimiter}${process.env.PATH}`;
@@ -47,7 +51,9 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 const db = admin.apps.length > 0 ? admin.firestore() : null;
 
 // Initialize Gemini
-const genAI = new GoogleGenAI({ apiKey: process.env.VITE_API_KEY || process.env.API_KEY });
+const genAI = new GoogleGenAI({ 
+  apiKey: process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY 
+});
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -87,7 +93,31 @@ async function saveCookiesToFirestore(platform, cookies) {
 
 // ---------- yt-dlp PATH ----------
 const isWin = process.platform === "win32";
-const YTDLP_PATH = path.join(__dirname, "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
+const isVercel = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+let YTDLP_PATH = path.join(__dirname, "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
+
+// Vercel Serverless Hack: Copy binary to /tmp to ensure execution permissions
+if (isVercel && !isWin) {
+  const tmpPath = path.join("/tmp", "yt-dlp");
+  try {
+    if (!fs.existsSync(tmpPath)) {
+      if (fs.existsSync(YTDLP_PATH)) {
+        console.log("📦 Vercel detected: Copying yt-dlp to /tmp...");
+        fs.copyFileSync(YTDLP_PATH, tmpPath);
+        fs.chmodSync(tmpPath, "755");
+        console.log("✅ yt-dlp copied and chmodded in /tmp");
+      } else {
+        console.warn("⚠️ yt-dlp binary not found at", YTDLP_PATH);
+      }
+    }
+    if (fs.existsSync(tmpPath)) {
+      YTDLP_PATH = tmpPath;
+    }
+  } catch (e) {
+    console.error("❌ Vercel binary prep failed:", e.message);
+    // Fallback to original path if copy fails
+  }
+}
 
 // ---------- Health ----------
 app.get("/api/health", (req, res) => {
@@ -96,7 +126,7 @@ app.get("/api/health", (req, res) => {
   if (exists) {
     try {
       version = require("child_process")
-        .execSync(`${YTDLP_PATH} --version`)
+        .execSync(`"${YTDLP_PATH}" --version`)
         .toString()
         .trim();
     } catch {}
@@ -104,9 +134,12 @@ app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     ts: Date.now(),
+    env: process.env.NODE_ENV,
+    isVercel,
     ytDlpAvailable: exists,
     ytDlpVersion: version,
     ytDlpPath: YTDLP_PATH,
+    apiKeyConfigured: !!(process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY),
     firebase: {
       active: !!db,
       initialized: admin.apps.length > 0

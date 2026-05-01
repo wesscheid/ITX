@@ -3,7 +3,7 @@
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "includeFiles": "server/bin/yt-dlp",
+      "includeFiles": "server/bin/**",
       "maxDuration": 60
     }
   },
