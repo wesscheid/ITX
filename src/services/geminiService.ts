@@ -9,7 +9,7 @@ export const translateVideo = async (
   mimeType: string,
   targetLanguage: string
 ): Promise<ProcessingResult> => {
-  const modelId = "gemini-2.5-flash";
+  const modelId = "gemini-1.5-flash";
 
   try {
     const prompt = `
@@ -89,7 +89,7 @@ export const translateVideoStream = async (
   mimeType: string,
   targetLanguage: string
 ): Promise<ProcessingResult> => {
-  const modelId = "gemini-2.5-flash";
+  const modelId = "gemini-1.5-flash";
 
   try {
     const prompt = `

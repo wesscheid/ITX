@@ -545,6 +545,11 @@ app.post("/api/transcribe", async (req, res) => {
     `;
 
     console.log("Fetching bytes for platform:", url);
+    if (!fs.existsSync(YTDLP_PATH)) {
+      res.write(JSON.stringify({ type: 'error', data: { message: "yt-dlp binary not found on server" } }) + '\n');
+      return res.end();
+    }
+
     const cookiePath = await getCookiesPath(url);
     
     let extractorArgs = "youtube:player_client=web,ios";
@@ -565,6 +570,12 @@ app.post("/api/transcribe", async (req, res) => {
     let chunks = [];
     let stderrData = "";
     
+    child.on("error", (err) => {
+      console.error("yt-dlp spawn error:", err);
+      res.write(JSON.stringify({ type: 'error', data: { message: `Failed to start video downloader: ${err.message}` } }) + '\n');
+      res.end();
+    });
+
     child.stderr.on("data", (data) => {
       const text = data.toString();
       stderrData += text;
@@ -586,7 +597,7 @@ app.post("/api/transcribe", async (req, res) => {
         res.write(JSON.stringify({ type: 'status', message: 'Processing with Gemini...' }) + '\n');
 
         const response = await genAI.models.generateContent({
-          model: "gemini-2.5-flash", 
+          model: "gemini-1.5-flash", 
           contents: {
             parts: [
               { inlineData: { data: buffer.toString("base64"), mimeType: "audio/mp4" } },
