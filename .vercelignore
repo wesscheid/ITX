@@ -1,0 +1,11 @@
+# Ignore binaries not for Linux
+server/bin/yt-dlp.exe
+server/bin/deno
+server/bin/deno.zip
+
+# Ignore logs
+*.log
+
+# Ignore local envs
+.env.local
+.env

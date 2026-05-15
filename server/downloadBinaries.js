@@ -9,160 +9,131 @@ if (!fs.existsSync(binDir)) {
     fs.mkdirSync(binDir);
 }
 
+const isVercel = !!process.env.VERCEL;
+
 const downloadYtdlp = async () => {
     let ytdlpUrl;
-    let ytdlpPath;
+    let ytdlpPath = path.join(binDir, 'yt-dlp');
 
     console.log("🔄 Downloading yt-dlp binary...");
 
-    if (os.platform() === 'win32') {
+    // On Vercel, we ONLY need Linux binaries
+    if (isVercel) {
+        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
+        console.log(`🚀 Vercel detected: Downloading Linux binary from ${ytdlpUrl}`);
+    } else if (os.platform() === 'win32') {
         ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe';
         ytdlpPath = path.join(binDir, 'yt-dlp.exe');
         console.log(`Downloading for Windows from ${ytdlpUrl}`);
-        // Use Invoke-WebRequest for Windows
-        const command = 'powershell.exe';
-        const args = [
-            '-NoProfile',
-            '-Command',
-            `Invoke-WebRequest -Uri "${ytdlpUrl}" -OutFile "${ytdlpPath}"`
-        ];
-        await new Promise((resolve, reject) => {
-            const child = spawn(command, args, { stdio: 'inherit' });
-            child.on('close', (code) => {
-                if (code === 0) {
-                    resolve();
-                } else {
-                    reject(new Error(`Invoke-WebRequest failed with code ${code}`));
-                }
-            });
-        });
+    } else if (os.platform() === 'darwin') {
+        ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos';
+        console.log(`Downloading for macOS from ${ytdlpUrl}`);
     } else {
-        // Use yt-dlp_linux (PyInstaller bundle) as it is standalone and doesn't require system Python
         ytdlpUrl = 'https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux';
-        ytdlpPath = path.join(binDir, 'yt-dlp');
-        console.log(`Downloading for Linux (Standalone) from ${ytdlpUrl}`);
-        // Use curl for Linux/macOS
-        const command = 'curl';
-        const args = ['-L', ytdlpUrl, '-o', ytdlpPath];
-        await new Promise((resolve, reject) => {
-            const child = spawn(command, args, { stdio: 'inherit' });
-            child.on('close', (code) => {
-                if (code === 0) {
-                    fs.chmodSync(ytdlpPath, '755'); // Make executable
-                    resolve();
-                } else {
-                    reject(new Error(`curl failed with code ${code}`));
-                }
-            });
-        });
+        console.log(`Downloading for Linux from ${ytdlpUrl}`);
     }
+
+    const command = os.platform() === 'win32' && !isVercel ? 'powershell.exe' : 'curl';
+    const args = os.platform() === 'win32' && !isVercel 
+        ? ['-NoProfile', '-Command', `Invoke-WebRequest -Uri "${ytdlpUrl}" -OutFile "${ytdlpPath}"`]
+        : ['-L', ytdlpUrl, '-o', ytdlpPath];
+
+    await new Promise((resolve, reject) => {
+        const child = spawn(command, args, { stdio: 'inherit' });
+        child.on('close', (code) => {
+            if (code === 0) {
+                if (os.platform() !== 'win32' || isVercel) fs.chmodSync(ytdlpPath, '755');
+                resolve();
+            } else {
+                reject(new Error(`${command} failed with code ${code}`));
+            }
+        });
+    });
 
     console.log("✅ yt-dlp downloaded.");
-
-    // Verify version and attempt self-update if possible
-    try {
-        const verifyOutput = require('child_process').execSync(`"${ytdlpPath}" --version`).toString().trim();
-        console.log(`🚀 yt-dlp version installed: ${verifyOutput}`);
-        
-        // Try self-update as a secondary measure (might fail on some environments, but that's okay)
-        console.log("🔄 Attempting yt-dlp self-update to be absolutely sure...");
-        try {
-            require('child_process').execSync(`"${ytdlpPath}" -U`);
-            const finalVersion = require('child_process').execSync(`"${ytdlpPath}" --version`).toString().trim();
-            console.log(`✅ yt-dlp is now at version: ${finalVersion}`);
-        } catch (updateErr) {
-            console.log("⚠️ Self-update skipped or failed (common in CI/restricted environments). Proceeding with downloaded binary.");
-        }
-    } catch (e) {
-        console.error("❌ Failed to verify yt-dlp version:", e.message);
-    }
 };
 
 const downloadFfmpeg = async () => {
     const ffmpegPath = path.join(binDir, 'ffmpeg');
-    if (fs.existsSync(ffmpegPath)) {
+    // On Vercel, always redownload to ensure correct architecture (Linux)
+    if (!isVercel && fs.existsSync(ffmpegPath)) {
         console.log("✅ FFmpeg already exists.");
         return;
     }
 
     console.log("🔄 Downloading FFmpeg (Static)...");
-    const ffmpegTarUrl = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz';
-    const ffmpegTarPath = path.join(binDir, 'ffmpeg.tar.xz');
+    let ffmpegUrl;
+    let ffmpegTempPath;
 
-    // Download FFmpeg tar.xz
-    if (os.platform() === 'win32') {
-        const command = 'powershell.exe';
-        const args = [
-            '-NoProfile',
-            '-Command',
-            `Invoke-WebRequest -Uri "${ffmpegTarUrl}" -OutFile "${ffmpegTarPath}"`
-        ];
+    if (isVercel) {
+        ffmpegUrl = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz';
+        ffmpegTempPath = path.join(binDir, 'ffmpeg.tar.xz');
+        console.log(`🚀 Vercel detected: Downloading Linux FFmpeg from ${ffmpegUrl}`);
+    } else if (os.platform() === 'darwin') {
+        ffmpegUrl = 'https://evermeet.cx/ffmpeg/getrelease/ffmpeg/zip';
+        ffmpegTempPath = path.join(binDir, 'ffmpeg.zip');
+    } else {
+        ffmpegUrl = 'https://johnvansickle.com/ffmpeg/releases/ffmpeg-release-amd64-static.tar.xz';
+        ffmpegTempPath = path.join(binDir, 'ffmpeg.tar.xz');
+    }
+
+    const downloadCommand = (os.platform() === 'win32' && !isVercel) ? 'powershell.exe' : 'curl';
+    const downloadArgs = (os.platform() === 'win32' && !isVercel)
+        ? ['-NoProfile', '-Command', `Invoke-WebRequest -Uri "${ffmpegUrl}" -OutFile "${ffmpegTempPath}"`]
+        : ['-L', ffmpegUrl, '-o', ffmpegTempPath];
+
+    await new Promise((resolve, reject) => {
+        const child = spawn(downloadCommand, downloadArgs, { stdio: 'inherit' });
+        child.on('close', (code) => {
+            if (code === 0) resolve();
+            else reject(new Error(`Download failed with code ${code}`));
+        });
+    });
+
+    console.log(`📦 Extracting FFmpeg...`);
+    
+    if (ffmpegTempPath.endsWith('.zip')) {
         await new Promise((resolve, reject) => {
-            const child = spawn(command, args, { stdio: 'inherit' });
+            const child = spawn('unzip', ['-o', ffmpegTempPath, '-d', binDir], { stdio: 'inherit' });
             child.on('close', (code) => {
                 if (code === 0) {
+                    fs.chmodSync(ffmpegPath, '755');
                     resolve();
                 } else {
-                    reject(new Error(`Invoke-WebRequest for FFmpeg failed with code ${code}`));
+                    reject(new Error(`unzip failed with code ${code}`));
                 }
             });
         });
     } else {
-        const command = 'curl';
-        const args = ['-L', ffmpegTarUrl, '-o', ffmpegTarPath];
+        // Linux extraction (tar.xz)
+        const tarArgs = ['-xJf', ffmpegTempPath, '-C', binDir, '--strip-components=1', '--wildcards', '*/ffmpeg'];
         await new Promise((resolve, reject) => {
-            const child = spawn(command, args, { stdio: 'inherit' });
+            const child = spawn('tar', tarArgs, { stdio: 'inherit' });
             child.on('close', (code) => {
                 if (code === 0) {
+                    fs.chmodSync(ffmpegPath, '755');
                     resolve();
                 } else {
-                    reject(new Error(`curl for FFmpeg failed with code ${code}`));
+                    reject(new Error(`tar extraction failed with code ${code}`));
                 }
             });
         });
     }
 
-    console.log("📦 Extracting FFmpeg...");
-    // Extraction with tar -xJf ...
-    // Note: Node.js's built-in zlib and tar modules can be complex for .tar.xz
-    // Using child_process to call system tar command
-    const tarCommand = 'tar';
-    const tarArgs = ['-xJf', ffmpegTarPath, '-C', binDir, '--strip-components=1', '--wildcards', '*/ffmpeg'];
-
-    await new Promise((resolve, reject) => {
-        const child = spawn(tarCommand, tarArgs, { stdio: 'inherit' });
-        child.on('close', (code) => {
-            if (code === 0) {
-                fs.chmodSync(ffmpegPath, '755'); // Make executable
-                resolve();
-            } else {
-                reject(new Error(`tar extraction failed with code ${code}`));
-            }
-        });
-    });
-
-    // Cleanup
-    fs.unlinkSync(ffmpegTarPath);
+    if (fs.existsSync(ffmpegTempPath)) fs.unlinkSync(ffmpegTempPath);
     console.log("✅ FFmpeg installed.");
-
-    // Verify FFmpeg version
-    const verifyCommand = ffmpegPath;
-    const verifyArgs = ['-version'];
-    console.log(`Verifying FFmpeg version with: ${verifyCommand} ${verifyArgs.join(' ')}`);
-    await new Promise((resolve, reject) => {
-        const child = spawn(verifyCommand, verifyArgs, { stdio: 'inherit' });
-        child.on('close', (code) => {
-            if (code === 0) {
-                resolve();
-            } else {
-                reject(new Error(`FFmpeg -version failed with code ${code}`));
-            }
-        });
-    });
 };
 
 (async () => {
     try {
+        // Clear bin dir on Vercel to ensure no architecture mix-up
+        if (isVercel && fs.existsSync(binDir)) {
+            console.log("🧹 Vercel: Clearing existing binaries...");
+            fs.readdirSync(binDir).forEach(file => {
+                const curPath = path.join(binDir, file);
+                if (!fs.lstatSync(curPath).isDirectory()) fs.unlinkSync(curPath);
+            });
+        }
         await downloadYtdlp();
         await downloadFfmpeg();
         console.log("🚀 Binaries ready!");

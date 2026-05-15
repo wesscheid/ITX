@@ -19,7 +19,18 @@ if (fs.existsSync(localDenoPath)) {
   console.log("🦕 Home Deno added to PATH");
 }
 
-require("dotenv").config({ path: path.join(__dirname, "../.env") });
+// Load environment variables from .env and .env.local
+const envPath = path.join(__dirname, "../.env");
+const envLocalPath = path.join(__dirname, "../.env.local");
+
+if (fs.existsSync(envLocalPath)) {
+  require("dotenv").config({ path: envLocalPath });
+  console.log("📝 Loaded environment from .env.local");
+} else if (fs.existsSync(envPath)) {
+  require("dotenv").config({ path: envPath });
+  console.log("📝 Loaded environment from .env");
+}
+
 const express = require("express");
 const cors = require("cors");
 const { exec, spawn } = require("child_process");
@@ -51,9 +62,14 @@ if (process.env.FIREBASE_SERVICE_ACCOUNT) {
 const db = admin.apps.length > 0 ? admin.firestore() : null;
 
 // Initialize Gemini
-const genAI = new GoogleGenAI({ 
-  apiKey: process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY 
-});
+const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY;
+if (!apiKey) {
+  console.error("❌ CRITICAL: No Gemini API Key found in environment variables!");
+} else {
+  console.log("✅ Gemini API Key detected");
+}
+
+const genAI = new GoogleGenAI({ apiKey });
 
 // Simple in-memory cache for metadata
 const metadataCache = new Map();
@@ -91,31 +107,36 @@ async function saveCookiesToFirestore(platform, cookies) {
   }
 }
 
-// ---------- yt-dlp PATH ----------
+// ---------- yt-dlp & ffmpeg PATH ----------
 const isWin = process.platform === "win32";
-const isVercel = process.env.VERCEL === "1" || process.env.NODE_ENV === "production";
+const isVercel = !!process.env.VERCEL;
 let YTDLP_PATH = path.join(__dirname, "bin", isWin ? "yt-dlp.exe" : "yt-dlp");
+let FFMPEG_PATH = path.join(__dirname, "bin", isWin ? "ffmpeg.exe" : "ffmpeg");
 
-// Vercel Serverless Hack: Copy binary to /tmp to ensure execution permissions
+// Vercel Serverless Hack: Copy binaries to /tmp to ensure execution permissions
 if (isVercel && !isWin) {
-  const tmpPath = path.join("/tmp", "yt-dlp");
+  const tmpYtDlp = path.join("/tmp", "yt-dlp");
+  const tmpFfmpeg = path.join("/tmp", "ffmpeg");
+  
   try {
-    if (!fs.existsSync(tmpPath)) {
-      if (fs.existsSync(YTDLP_PATH)) {
-        console.log("📦 Vercel detected: Copying yt-dlp to /tmp...");
-        fs.copyFileSync(YTDLP_PATH, tmpPath);
-        fs.chmodSync(tmpPath, "755");
-        console.log("✅ yt-dlp copied and chmodded in /tmp");
-      } else {
-        console.warn("⚠️ yt-dlp binary not found at", YTDLP_PATH);
-      }
+    if (!fs.existsSync(tmpYtDlp) && fs.existsSync(YTDLP_PATH)) {
+      console.log("📦 Vercel: Copying yt-dlp to /tmp...");
+      fs.copyFileSync(YTDLP_PATH, tmpYtDlp);
+      fs.chmodSync(tmpYtDlp, "755");
     }
-    if (fs.existsSync(tmpPath)) {
-      YTDLP_PATH = tmpPath;
+    if (!fs.existsSync(tmpFfmpeg) && fs.existsSync(FFMPEG_PATH)) {
+      console.log("📦 Vercel: Copying ffmpeg to /tmp...");
+      fs.copyFileSync(FFMPEG_PATH, tmpFfmpeg);
+      fs.chmodSync(tmpFfmpeg, "755");
     }
+    
+    if (fs.existsSync(tmpYtDlp)) YTDLP_PATH = tmpYtDlp;
+    if (fs.existsSync(tmpFfmpeg)) FFMPEG_PATH = tmpFfmpeg;
+    
+    // Add /tmp to PATH so yt-dlp can find ffmpeg
+    process.env.PATH = `/tmp:${process.env.PATH}`;
   } catch (e) {
     console.error("❌ Vercel binary prep failed:", e.message);
-    // Fallback to original path if copy fails
   }
 }
 
@@ -123,14 +144,27 @@ if (isVercel && !isWin) {
 app.get("/api/health", (req, res) => {
   const exists = fs.existsSync(YTDLP_PATH);
   let version = "missing";
+  let binFiles = [];
+  
+  try {
+    if (fs.existsSync(binPath)) {
+      binFiles = fs.readdirSync(binPath);
+    }
+  } catch (e) {
+    binFiles = [`Error listing bin: ${e.message}`];
+  }
+
   if (exists) {
     try {
       version = require("child_process")
         .execSync(`"${YTDLP_PATH}" --version`)
         .toString()
         .trim();
-    } catch {}
+    } catch (e) {
+      version = `Error: ${e.message}`;
+    }
   }
+  
   res.json({
     status: "ok",
     ts: Date.now(),
@@ -139,6 +173,9 @@ app.get("/api/health", (req, res) => {
     ytDlpAvailable: exists,
     ytDlpVersion: version,
     ytDlpPath: YTDLP_PATH,
+    binContents: binFiles,
+    cwd: process.cwd(),
+    dirname: __dirname,
     apiKeyConfigured: !!(process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY),
     firebase: {
       active: !!db,
@@ -236,10 +273,10 @@ async function getCookiesPath(targetUrl) {
       
       // Prioritize /tmp (user updates) over bundled files
       if (fs.existsSync(ytTmpPath)) {
-        console.log("✅ Found updated cookie file: /tmp/cookies_instagram.txt");
+        console.log("✅ Found updated cookie file: /tmp/cookies_youtube.txt");
         rawCookies = fs.readFileSync(ytTmpPath, "utf8");
       } else if (fs.existsSync(ytPath)) {
-        console.log("✅ Found bundled cookie file: cookies_instagram.txt");
+        console.log("✅ Found bundled cookie file: cookies_youtube.txt");
         rawCookies = fs.readFileSync(ytPath, "utf8");
       } else if (process.env.YOUTUBE_COOKIES) {
         console.log("✅ Using YOUTUBE_COOKIES env var");
@@ -256,7 +293,7 @@ async function getCookiesPath(targetUrl) {
       try {
         rawCookies = fs.readFileSync(secretPath, "utf8");
       } catch (e) {
-        console.error("Error reading secret file:", e);
+        console.error("❌ Error reading secret file:", e);
       }
     }
 
@@ -274,7 +311,10 @@ async function getCookiesPath(targetUrl) {
     }
   }
 
-  if (!rawCookies) return null;
+  if (!rawCookies) {
+    console.log("ℹ️ No cookies found for this request");
+    return null;
+  }
 
   try {
     const trimmed = rawCookies.trim();
@@ -622,22 +662,20 @@ app.post("/api/transcribe", async (req, res) => {
     child.on("close", async (code) => {
       try {
         const buffer = Buffer.concat(chunks);
+        console.log(`📦 Media bytes fetched: ${buffer.length} bytes (Exit Code: ${code})`);
+        
         if (buffer.length === 0) {
+          console.error("❌ Failed to fetch media bytes. stderr:", stderrData);
           res.write(JSON.stringify({ type: 'error', data: { error: "Failed to fetch media bytes", details: stderrData } }) + '\n');
           return res.end();
         }
 
         res.write(JSON.stringify({ type: 'status', message: 'Processing with Gemini...' }) + '\n');
+        console.log("🤖 Sending to Gemini Flash 1.5...");
 
-        const response = await genAI.models.generateContent({
-          model: "gemini-1.5-flash", 
-          contents: {
-            parts: [
-              { inlineData: { data: buffer.toString("base64"), mimeType: "audio/mp4" } },
-              { text: prompt }
-            ]
-          },
-          config: {
+        const model = genAI.getGenerativeModel({ 
+          model: "gemini-1.5-flash",
+          generationConfig: {
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -650,12 +688,32 @@ app.post("/api/transcribe", async (req, res) => {
             },
           }
         });
+
+        const result = await model.generateContent({
+          contents: [{
+            role: "user",
+            parts: [
+              { inlineData: { data: buffer.toString("base64"), mimeType: "audio/mp4" } },
+              { text: prompt }
+            ]
+          }]
+        });
         
-        const resultData = JSON.parse(response.text);
-        res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+        const response = result.response;
+        const rawText = response.text();
+        console.log("✅ Gemini response received");
+        
+        try {
+          const resultData = JSON.parse(rawText);
+          res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
+        } catch (parseErr) {
+          console.error("❌ Failed to parse Gemini JSON output:", rawText);
+          res.write(JSON.stringify({ type: 'error', data: { message: "AI returned invalid JSON formatting", details: rawText } }) + '\n');
+        }
         res.end();
       } catch (geminiErr) {
-        res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message } }) + '\n');
+        console.error("❌ Gemini Processing Error:", geminiErr);
+        res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message || "Gemini processing failed" } }) + '\n');
         res.end();
       }
     });
@@ -720,6 +778,17 @@ app.post("/api/cookies", async (req, res) => {
 });
 
 // ---------- Start server ----------
+// Global Error Handler
+app.use((err, req, res, next) => {
+  console.error("💥 Uncaught Backend Error:", err);
+  if (!res.headersSent) {
+    res.status(500).json({ 
+      error: err.message, 
+      stack: process.env.NODE_ENV === 'development' ? err.stack : undefined 
+    });
+  }
+});
+
 // Serve Frontend (Must be last)
 const distPath = path.join(__dirname, "../dist");
 app.use(express.static(distPath));

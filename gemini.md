@@ -107,3 +107,22 @@ The application can also be deployed to Vercel.
 ## 9. Deployment Protocol
 - **Version Management:** For every deployment to Vercel, the `version` field in the root `package.json` **MUST** be incremented based on semantic versioning principles (e.g., `0.0.1` -> `0.0.2` for bug fixes, `0.1.0` for new features, `1.0.0` for major releases).
 - **Versioning for Future Agents:** Future agents are mandated to update the `version` field in `package.json` to a new, incremented version number every time a deployment to Vercel is made for this project. This helps users identify if they are working with the latest deployed version.
+- ** Vercel CLI is available for testing, configuration or deployment needs.
+
+## 10. Environment Management & Binary Handling
+
+### A. The "Vercel-First" Mandate
+- **Deployment Platform:** The primary production environment is **Vercel** (and Render).
+- **Architecture:** Vercel operates on **AWS Lambda (Linux)**.
+- **Critical Constraint:** Vercel functions have a **read-only filesystem** (except `/tmp`), a **10MB response size limit**, and a **10MB request size limit**.
+- **Agent Instruction:** NEVER assume changes made for local development (macOS/Windows) will work on Vercel. Always verify cross-platform compatibility.
+
+### B. Cross-Platform Binaries
+- **Development:** Often performed on macOS (Darwin).
+- **Production:** Runs on Linux (ELF).
+- **Strategy:** `downloadBinaries.js` MUST detect the OS and download the appropriate versions. `server.js` MUST handle binaries in a location that is executable on Vercel (e.g., copying from `server/bin` to `/tmp` and adding `/tmp` to `process.env.PATH`).
+
+### C. Local vs. Production Env
+- **Local:** Uses `.env.local` for development secrets (Gemini API keys, etc.).
+- **Production:** Uses platform environment variables.
+- **Agent Instruction:** Always check for both `.env` and `.env.local` when investigating local issues, but ensure the code is robust enough to use platform variables in production.

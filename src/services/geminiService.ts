@@ -1,7 +1,15 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProcessingResult } from "../types";
 
-const apiKey = process.env.GEMINI_API_KEY || process.env.VITE_API_KEY || process.env.API_KEY || "";
+const getApiKey = () => {
+  try {
+    return import.meta.env.VITE_API_KEY || (typeof process !== 'undefined' ? process.env.GEMINI_API_KEY || process.env.API_KEY : "");
+  } catch (e) {
+    return "";
+  }
+};
+
+const apiKey = getApiKey();
 const ai = new GoogleGenAI({ apiKey });
 
 export const translateVideo = async (
@@ -36,22 +44,10 @@ export const translateVideo = async (
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
-    const response = await ai.models.generateContent({
+    // @ts-ignore
+    const model = ai.getGenerativeModel({ 
       model: modelId,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data,
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
-      },
-      config: {
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -65,11 +61,29 @@ export const translateVideo = async (
       },
     });
 
-    if (!response.text) {
+    const result = await model.generateContent({
+      contents: [{
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      }]
+    });
+
+    const response = result.response;
+    if (!response.text()) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(response.text);
+    const jsonResult = JSON.parse(response.text());
 
     return {
       title: jsonResult.title,
@@ -129,22 +143,10 @@ export const translateVideoStream = async (
 
     const base64Data = await base64Promise;
 
-    const response = await ai.models.generateContent({
+    // @ts-ignore
+    const model = ai.getGenerativeModel({ 
       model: modelId,
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              mimeType: mimeType,
-              data: base64Data,
-            },
-          },
-          {
-            text: prompt,
-          },
-        ],
-      },
-      config: {
+      generationConfig: {
         responseMimeType: "application/json",
         responseSchema: {
           type: Type.OBJECT,
@@ -158,11 +160,29 @@ export const translateVideoStream = async (
       },
     });
 
-    if (!response.text) {
+    const result = await model.generateContent({
+      contents: [{
+        role: "user",
+        parts: [
+          {
+            inlineData: {
+              mimeType: mimeType,
+              data: base64Data,
+            },
+          },
+          {
+            text: prompt,
+          },
+        ],
+      }]
+    });
+
+    const response = result.response;
+    if (!response.text()) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(response.text);
+    const jsonResult = JSON.parse(response.text());
 
     return {
       title: jsonResult.title,
