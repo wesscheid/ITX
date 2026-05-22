@@ -78,6 +78,14 @@ const CACHE_TTL = 10 * 60 * 1000; // 10 minutes
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
 
+// Top-level Logger for Vercel troubleshooting
+app.use((req, res, next) => {
+  if (req.path !== '/api/health') {
+    console.log(`📡 [${req.method}] ${req.path} - Body size: ${JSON.stringify(req.body).length} chars`);
+  }
+  next();
+});
+
 // ---------- Firestore Helpers ----------
 async function getCookiesFromFirestore(platform) {
   if (!db) return null;
@@ -640,8 +648,9 @@ app.post("/api/transcribe", async (req, res) => {
     if (cookiePath) ytDlpArgs.unshift("--cookies", cookiePath);
 
     const child = spawn(YTDLP_PATH, ytDlpArgs);
-    let chunks = [];
     let stderrData = "";
+    const tempAudioPath = path.join(os.tmpdir(), `audio_${Date.now()}.m4a`);
+    const writeStream = fs.createWriteStream(tempAudioPath);
     
     child.on("error", (err) => {
       console.error("yt-dlp spawn error:", err);
@@ -657,15 +666,17 @@ app.post("/api/transcribe", async (req, res) => {
       });
     });
 
-    child.stdout.on("data", (chunk) => chunks.push(chunk));
+    child.stdout.pipe(writeStream);
 
     child.on("close", async (code) => {
       try {
-        const buffer = Buffer.concat(chunks);
-        console.log(`📦 Media bytes fetched: ${buffer.length} bytes (Exit Code: ${code})`);
+        writeStream.end();
+        const stats = fs.statSync(tempAudioPath);
+        console.log(`📦 Media bytes fetched: ${stats.size} bytes (Exit Code: ${code})`);
         
-        if (buffer.length === 0) {
+        if (stats.size === 0) {
           console.error("❌ Failed to fetch media bytes. stderr:", stderrData);
+          if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
           res.write(JSON.stringify({ type: 'error', data: { error: "Failed to fetch media bytes", details: stderrData } }) + '\n');
           return res.end();
         }
@@ -673,9 +684,20 @@ app.post("/api/transcribe", async (req, res) => {
         res.write(JSON.stringify({ type: 'status', message: 'Processing with Gemini...' }) + '\n');
         console.log("🤖 Sending to Gemini Flash 1.5...");
 
-        const model = genAI.getGenerativeModel({ 
-          model: "gemini-1.5-flash",
-          generationConfig: {
+        const audioBase64 = fs.readFileSync(tempAudioPath, { encoding: 'base64' });
+
+        const response = await genAI.models.generateContent({
+          model: "gemini-2.5-flash", 
+          contents: [
+            {
+              role: "user",
+              parts: [
+                { inlineData: { data: audioBase64, mimeType: "audio/mp4" } },
+                { text: prompt }
+              ]
+            }
+          ],
+          config: {
             responseMimeType: "application/json",
             responseSchema: {
               type: Type.OBJECT,
@@ -688,19 +710,11 @@ app.post("/api/transcribe", async (req, res) => {
             },
           }
         });
-
-        const result = await model.generateContent({
-          contents: [{
-            role: "user",
-            parts: [
-              { inlineData: { data: buffer.toString("base64"), mimeType: "audio/mp4" } },
-              { text: prompt }
-            ]
-          }]
-        });
         
-        const response = result.response;
-        const rawText = response.text();
+        // Clean up temp file immediately after sending to Gemini
+        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+
+        const rawText = response.text;
         console.log("✅ Gemini response received");
         
         try {
@@ -713,6 +727,7 @@ app.post("/api/transcribe", async (req, res) => {
         res.end();
       } catch (geminiErr) {
         console.error("❌ Gemini Processing Error:", geminiErr);
+        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
         res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message || "Gemini processing failed" } }) + '\n');
         res.end();
       }

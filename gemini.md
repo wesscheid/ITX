@@ -9,7 +9,7 @@ Originally focused on Instagram, the project is currently expanding to support m
 - **Frontend:** React 19 (Vite), TypeScript, Tailwind CSS v3.
 - **Backend:** Node.js, Express.js.
 - **Video Processing:** `yt-dlp` (Binary executable managed by the backend).
-- **AI Model:** Google Gemini 1.5 Flash (`gemini-1.5-flash`) via `@google/genai` SDK.
+- **AI Model:** Google Gemini 2.5 Flash (`gemini-2.5-flash`) via `@google/genai` SDK.
 - **Deployment:** Render (Web Service running both Frontend static files and Backend API), Vercel (Frontend and Backend API).
 
 ## 3. Architecture & Data Flow
@@ -30,7 +30,7 @@ Originally focused on Instagram, the project is currently expanding to support m
 6.  **Output:** JSON response containing `originalText` and `translatedText`.
 
 ### B. Gemini Integration (`services/geminiService.ts`)
--   **Model:** `gemini-1.5-flash`.
+-   **Model:** `gemini-2.5-flash`.
 -   **Input:** Multimodal (Text Prompt + Inline Media Data - audio/m4a).
 -   **Output:** Strict JSON Schema (`application/json`).
 

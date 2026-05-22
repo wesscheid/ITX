@@ -17,7 +17,7 @@ export const translateVideo = async (
   mimeType: string,
   targetLanguage: string
 ): Promise<ProcessingResult> => {
-  const modelId = "gemini-1.5-flash";
+  const modelId = "gemini-2.5-flash";
 
   try {
     const prompt = `
@@ -44,24 +44,8 @@ export const translateVideo = async (
       If there is no speech, describe the audio/visual content in the "originalText" field and translate that description.
     `;
 
-    // @ts-ignore
-    const model = ai.getGenerativeModel({ 
+    const result = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      },
-    });
-
-    const result = await model.generateContent({
       contents: [{
         role: "user",
         parts: [
@@ -75,15 +59,26 @@ export const translateVideo = async (
             text: prompt,
           },
         ],
-      }]
+      }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["title", "originalText", "translatedText"],
+        },
+      },
     });
 
-    const response = result.response;
-    if (!response.text()) {
+    if (!result.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(response.text());
+    const jsonResult = JSON.parse(result.text);
 
     return {
       title: jsonResult.title,
@@ -103,7 +98,7 @@ export const translateVideoStream = async (
   mimeType: string,
   targetLanguage: string
 ): Promise<ProcessingResult> => {
-  const modelId = "gemini-1.5-flash";
+  const modelId = "gemini-2.5-flash";
 
   try {
     const prompt = `
@@ -143,24 +138,8 @@ export const translateVideoStream = async (
 
     const base64Data = await base64Promise;
 
-    // @ts-ignore
-    const model = ai.getGenerativeModel({ 
+    const result = await ai.models.generateContent({
       model: modelId,
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.OBJECT,
-          properties: {
-            title: { type: Type.STRING },
-            originalText: { type: Type.STRING },
-            translatedText: { type: Type.STRING },
-          },
-          required: ["title", "originalText", "translatedText"],
-        },
-      },
-    });
-
-    const result = await model.generateContent({
       contents: [{
         role: "user",
         parts: [
@@ -174,15 +153,26 @@ export const translateVideoStream = async (
             text: prompt,
           },
         ],
-      }]
+      }],
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            title: { type: Type.STRING },
+            originalText: { type: Type.STRING },
+            translatedText: { type: Type.STRING },
+          },
+          required: ["title", "originalText", "translatedText"],
+        },
+      },
     });
 
-    const response = result.response;
-    if (!response.text()) {
+    if (!result.text) {
       throw new Error("No response text generated");
     }
 
-    const jsonResult = JSON.parse(response.text());
+    const jsonResult = JSON.parse(result.text);
 
     return {
       title: jsonResult.title,
