@@ -127,15 +127,39 @@ if (isVercel && !isWin) {
   const tmpFfmpeg = path.join("/tmp", "ffmpeg");
   
   try {
-    if (!fs.existsSync(tmpYtDlp) && fs.existsSync(YTDLP_PATH)) {
-      console.log("📦 Vercel: Copying yt-dlp to /tmp...");
-      fs.copyFileSync(YTDLP_PATH, tmpYtDlp);
-      fs.chmodSync(tmpYtDlp, "755");
+    if (fs.existsSync(YTDLP_PATH)) {
+      let shouldCopy = true;
+      if (fs.existsSync(tmpYtDlp)) {
+        try {
+          const srcStat = fs.statSync(YTDLP_PATH);
+          const dstStat = fs.statSync(tmpYtDlp);
+          if (srcStat.size === dstStat.size && srcStat.mtimeMs === dstStat.mtimeMs) {
+            shouldCopy = false;
+          }
+        } catch (e) {}
+      }
+      if (shouldCopy) {
+        console.log("📦 Vercel: Copying latest yt-dlp to /tmp...");
+        fs.copyFileSync(YTDLP_PATH, tmpYtDlp);
+        fs.chmodSync(tmpYtDlp, "755");
+      }
     }
-    if (!fs.existsSync(tmpFfmpeg) && fs.existsSync(FFMPEG_PATH)) {
-      console.log("📦 Vercel: Copying ffmpeg to /tmp...");
-      fs.copyFileSync(FFMPEG_PATH, tmpFfmpeg);
-      fs.chmodSync(tmpFfmpeg, "755");
+    if (fs.existsSync(FFMPEG_PATH)) {
+      let shouldCopy = true;
+      if (fs.existsSync(tmpFfmpeg)) {
+        try {
+          const srcStat = fs.statSync(FFMPEG_PATH);
+          const dstStat = fs.statSync(tmpFfmpeg);
+          if (srcStat.size === dstStat.size && srcStat.mtimeMs === dstStat.mtimeMs) {
+            shouldCopy = false;
+          }
+        } catch (e) {}
+      }
+      if (shouldCopy) {
+        console.log("📦 Vercel: Copying latest ffmpeg to /tmp...");
+        fs.copyFileSync(FFMPEG_PATH, tmpFfmpeg);
+        fs.chmodSync(tmpFfmpeg, "755");
+      }
     }
     
     if (fs.existsSync(tmpYtDlp)) YTDLP_PATH = tmpYtDlp;
@@ -153,7 +177,23 @@ app.get("/api/health", (req, res) => {
   const exists = fs.existsSync(YTDLP_PATH);
   let version = "missing";
   let binFiles = [];
-  
+  let updateLog = null;
+
+  // Optional trigger: /api/health?update=true forces yt-dlp -U self-update
+  if (req.query.update === "true" && exists) {
+    try {
+      console.log("🔄 Triggering live yt-dlp self-update (-U)...");
+      updateLog = require("child_process")
+        .execSync(`"${YTDLP_PATH}" -U`)
+        .toString()
+        .trim();
+      console.log("✅ yt-dlp update output:", updateLog);
+    } catch (uErr) {
+      updateLog = `Update error: ${uErr.message}`;
+      console.error("❌ yt-dlp update failed:", uErr.message);
+    }
+  }
+
   try {
     if (fs.existsSync(binPath)) {
       binFiles = fs.readdirSync(binPath);
@@ -181,6 +221,7 @@ app.get("/api/health", (req, res) => {
     ytDlpAvailable: exists,
     ytDlpVersion: version,
     ytDlpPath: YTDLP_PATH,
+    updateLog,
     binContents: binFiles,
     cwd: process.cwd(),
     dirname: __dirname,

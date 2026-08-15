@@ -36,7 +36,7 @@ const downloadYtdlp = async () => {
     const command = os.platform() === 'win32' && !isVercel ? 'powershell.exe' : 'curl';
     const args = os.platform() === 'win32' && !isVercel 
         ? ['-NoProfile', '-Command', `Invoke-WebRequest -Uri "${ytdlpUrl}" -OutFile "${ytdlpPath}"`]
-        : ['-L', ytdlpUrl, '-o', ytdlpPath];
+        : ['-fL', '--retry', '3', ytdlpUrl, '-o', ytdlpPath];
 
     await new Promise((resolve, reject) => {
         const child = spawn(command, args, { stdio: 'inherit' });
@@ -80,7 +80,7 @@ const downloadFfmpeg = async () => {
     const downloadCommand = (os.platform() === 'win32' && !isVercel) ? 'powershell.exe' : 'curl';
     const downloadArgs = (os.platform() === 'win32' && !isVercel)
         ? ['-NoProfile', '-Command', `Invoke-WebRequest -Uri "${ffmpegUrl}" -OutFile "${ffmpegTempPath}"`]
-        : ['-L', ffmpegUrl, '-o', ffmpegTempPath];
+        : ['-fL', '--retry', '3', ffmpegUrl, '-o', ffmpegTempPath];
 
     await new Promise((resolve, reject) => {
         const child = spawn(downloadCommand, downloadArgs, { stdio: 'inherit' });
