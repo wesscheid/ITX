@@ -180,7 +180,7 @@ const App: React.FC = () => {
   // Friendly error message display
   let displayErrorTitle = "Error";
   let displayErrorText = errorMsg?.message || "An unknown error occurred.";
-  let displayErrorDetails: string | undefined = undefined;
+  let displayErrorDetails: string | undefined = errorMsg?.details;
 
   if (isManualDownloadNeeded) {
     displayErrorTitle = "Automatic Download Blocked";
@@ -188,7 +188,6 @@ const App: React.FC = () => {
   } else if (isResolverError) {
     displayErrorTitle = "Connection Failed";
     displayErrorText = "Could not connect to the video resolver service. This is usually caused by AdBlockers, Privacy Extensions, or Network Firewalls.";
-    displayErrorDetails = errorMsg?.details; // Show backend yt-dlp details
   }
 
   return (
@@ -256,59 +255,69 @@ const App: React.FC = () => {
 
           {/* Error Message Area */}
           {status === AppStatus.ERROR && (
-            <div className="mt-6 p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-lg flex items-start gap-3 animate-in slide-in-from-top-2">
-               <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
-                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
-                </svg>
-              <div className="text-sm text-red-700 dark:text-red-300 w-full">
-                <p className="font-bold text-base mb-1">{displayErrorTitle}</p>
-                <p>{displayErrorText}</p>
-                
-                {/* Scenario 1: We have a URL, but proxies failed */}
-                {manualDownloadUrl && (
-                  <div className="mt-3 p-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <p className="mb-3 text-slate-600 dark:text-slate-400 font-medium">
-                      Solution: Download the audio manually
-                    </p>
-                    <a 
-                      href={manualDownloadUrl} 
-                      target="_blank" 
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center justify-center w-full sm:w-auto px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
-                    >
-                      <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                      </svg>
-                      Click to Download Audio
-                    </a>
-                    <p className="mt-3 text-xs text-slate-500 dark:text-slate-500">
-                      Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file "extracted_audio.mp3".
-                    </p>
-                  </div>
-                )}
-
-                {/* Scenario 2: Resolver failed completely */}
-                {isResolverError && (
-                  <div className="mt-3 p-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
-                    <p className="mb-2 text-slate-600 dark:text-slate-400 font-medium">
-                      Solution: Use an external downloader
-                    </p>
-                    <p className="text-xs text-slate-500 mb-3">
-                      Since your network is blocking our resolver, please use a third-party website to download the file first.
-                    </p>
-                    <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 mb-3">
-                      <li>Go to a site like <strong>SnapInsta</strong> or <strong>SaveIG</strong>.</li>
-                      <li>Paste your Instagram link there and download the video/audio.</li>
-                      <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
-                    </ol>
-                    {displayErrorDetails && (
-                      <p className="mt-3 text-xs text-red-400 dark:text-red-500 font-mono bg-red-900/10 p-2 rounded-md overflow-x-auto">
-                        Details: {displayErrorDetails}
+            <div className="mt-6 space-y-4">
+              <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-800 rounded-lg flex items-start gap-3 animate-in slide-in-from-top-2">
+                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                  </svg>
+                <div className="text-sm text-red-700 dark:text-red-300 w-full">
+                  <p className="font-bold text-base mb-1">{displayErrorTitle}</p>
+                  <p>{displayErrorText}</p>
+                  
+                  {/* Scenario 1: We have a URL, but proxies failed */}
+                  {manualDownloadUrl && (
+                    <div className="mt-3 p-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <p className="mb-3 text-slate-600 dark:text-slate-400 font-medium">
+                        Solution: Download the audio manually
                       </p>
-                    )}
-                  </div>
-                )}
+                      <a 
+                        href={manualDownloadUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center justify-center w-full sm:w-auto px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-purple-600 hover:bg-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-purple-500 transition-colors"
+                      >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 mr-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                        Click to Download Audio
+                      </a>
+                      <p className="mt-3 text-xs text-slate-500 dark:text-slate-500">
+                        Step 2: After downloading, switch to the <strong>"Upload File"</strong> tab above and select the file "extracted_audio.mp3".
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Scenario 2: Resolver failed completely */}
+                  {isResolverError && (
+                    <div className="mt-3 p-4 bg-white dark:bg-slate-900 rounded-lg border border-slate-200 dark:border-slate-700 shadow-sm">
+                      <p className="mb-2 text-slate-600 dark:text-slate-400 font-medium">
+                        Solution: Use an external downloader
+                      </p>
+                      <p className="text-xs text-slate-500 mb-3">
+                        Since your network is blocking our resolver, please use a third-party website to download the file first.
+                      </p>
+                      <ol className="list-decimal list-inside text-xs text-slate-600 dark:text-slate-400 space-y-1 mb-3">
+                        <li>Go to a site like <strong>SnapInsta</strong> or <strong>SaveIG</strong>.</li>
+                        <li>Paste your Instagram link there and download the video/audio.</li>
+                        <li>Come back here and use the <strong>"Upload File"</strong> tab.</li>
+                      </ol>
+                      {displayErrorDetails && (
+                        <p className="mt-3 text-xs text-red-400 dark:text-red-500 font-mono bg-red-900/10 p-2 rounded-md overflow-x-auto">
+                          Details: {displayErrorDetails}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
+
+              {progress.logs && progress.logs.length > 0 && (
+                <LogConsole 
+                  logs={progress.logs} 
+                  title="yt-dlp Execution Log" 
+                  defaultExpanded={true} 
+                />
+              )}
             </div>
           )}
 

@@ -8,6 +8,7 @@ interface LogConsoleProps {
 
 const LogConsole: React.FC<LogConsoleProps> = ({ logs, title = "Runtime Logs", defaultExpanded = true }) => {
   const [showConsole, setShowConsole] = useState(defaultExpanded);
+  const [copied, setCopied] = useState(false);
   const logEndRef = useRef<HTMLDivElement>(null);
 
   // Auto-scroll to bottom when logs update
@@ -16,6 +17,13 @@ const LogConsole: React.FC<LogConsoleProps> = ({ logs, title = "Runtime Logs", d
       logEndRef.current.scrollIntoView({ behavior: 'smooth' });
     }
   }, [logs, showConsole]);
+
+  const handleCopyLogs = () => {
+    if (!logs || logs.length === 0) return;
+    navigator.clipboard.writeText(logs.join('\n'));
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   if (!logs || logs.length === 0) return null;
 
@@ -26,12 +34,22 @@ const LogConsole: React.FC<LogConsoleProps> = ({ logs, title = "Runtime Logs", d
           onClick={() => setShowConsole(!showConsole)}
           className="text-xs font-medium text-slate-500 dark:text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 flex items-center gap-1 transition-colors"
         >
-          <svg xmlns="http://www.w3.org/2000/svg" className={`h-3 w-3 transition-transform ${showConsole ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg xmlns="http://www.w3.org/2000/svg" className={`h-3.5 w-3.5 transition-transform ${showConsole ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
           </svg>
-          {showConsole ? `Hide ${title}` : `Show ${title}`}
+          {showConsole ? `Hide ${title}` : `Show ${title} (${logs.length} lines)`}
         </button>
-        <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{title}</span>
+        <div className="flex items-center gap-2">
+          {showConsole && (
+            <button
+              onClick={handleCopyLogs}
+              className="text-[11px] px-2 py-0.5 rounded bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300 hover:bg-slate-300 dark:hover:bg-slate-600 transition-colors flex items-center gap-1 font-sans"
+            >
+              {copied ? '✓ Copied' : 'Copy Logs'}
+            </button>
+          )}
+          <span className="text-[10px] text-slate-400 uppercase tracking-widest font-bold">{title}</span>
+        </div>
       </div>
       
       {showConsole && (

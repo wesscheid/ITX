@@ -1,5 +1,6 @@
 import { GoogleGenAI, Type } from "@google/genai";
 import { ProcessingResult } from "../types";
+import { DownloaderError } from "./videoDownloaderService";
 
 const getApiKey = () => {
   try {
@@ -206,14 +207,15 @@ export const transcribeUrl = async (
   if (!response.ok) {
     try {
       const error = await response.json();
-      throw new Error(error.error || 'Failed to transcribe video');
+      throw new DownloaderError(error.error || 'Failed to transcribe video', error.code || 'HTTP_ERROR', error.details);
     } catch (e) {
-      throw new Error(`Server error: ${response.status} ${response.statusText}`);
+      if (e instanceof DownloaderError) throw e;
+      throw new DownloaderError(`Server error: ${response.status} ${response.statusText}`, 'HTTP_ERROR');
     }
   }
 
   if (!response.body) {
-    throw new Error('No response body received');
+    throw new DownloaderError('No response body received', 'EMPTY_RESPONSE');
   }
 
   const reader = response.body.getReader();
@@ -266,11 +268,13 @@ export const transcribeUrl = async (
             break;
             
           case 'error':
-            throw new Error(msg.data?.message || msg.data?.error || 'Unknown server error');
+            throw new DownloaderError(
+              msg.data?.message || msg.data?.error || 'Unknown server error',
+              'RESOLVER_CONNECTION_ERROR',
+              msg.data?.details || msg.data?.message
+            );
         }
       } catch (e) {
-        // If it's a parse error from a partial line, we might ignore, 
-        // but since we split by \n, it should be fine.
         if (e instanceof SyntaxError) {
            console.warn('Failed to parse stream line:', line);
            continue;
