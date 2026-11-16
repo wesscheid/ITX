@@ -268,6 +268,7 @@ async function getCookiesPath(targetUrl) {
     if (lowerUrl.includes("x.com") || lowerUrl.includes("twitter.com")) platform = "twitter";
     else if (lowerUrl.includes("instagram.com")) platform = "instagram";
     else if (lowerUrl.includes("youtube.com") || lowerUrl.includes("youtu.be")) platform = "youtube";
+    else if (lowerUrl.includes("facebook.com") || lowerUrl.includes("fb.watch") || lowerUrl.includes("fb.gg")) platform = "facebook";
 
     if (platform) {
       console.log(`🔍 Checking Firestore for ${platform} cookies...`);
@@ -330,6 +331,24 @@ async function getCookiesPath(targetUrl) {
       } else if (process.env.YOUTUBE_COOKIES) {
         console.log("✅ Using YOUTUBE_COOKIES env var");
         rawCookies = process.env.YOUTUBE_COOKIES;
+      }
+    }
+    
+    // Facebook
+    else if (lowerUrl.includes("facebook.com") || lowerUrl.includes("fb.watch") || lowerUrl.includes("fb.gg")) {
+      const fbPath = path.join(__dirname, "../cookies_facebook.txt");
+      const fbTmpPath = path.join(os.tmpdir(), "cookies_facebook.txt");
+      
+      // Prioritize /tmp (user updates) over bundled files
+      if (fs.existsSync(fbTmpPath)) {
+        console.log("✅ Found updated cookie file: /tmp/cookies_facebook.txt");
+        rawCookies = fs.readFileSync(fbTmpPath, "utf8");
+      } else if (fs.existsSync(fbPath)) {
+        console.log("✅ Found bundled cookie file: cookies_facebook.txt");
+        rawCookies = fs.readFileSync(fbPath, "utf8");
+      } else if (process.env.FB_COOKIES) {
+        console.log("✅ Using FB_COOKIES env var");
+        rawCookies = process.env.FB_COOKIES;
       }
     }
   }
@@ -802,6 +821,7 @@ app.post("/api/cookies", async (req, res) => {
     if (platform === "youtube") filePath = path.join(__dirname, "../cookies_youtube.txt");
     else if (platform === "instagram") filePath = path.join(__dirname, "../cookies_instagram.txt");
     else if (platform === "twitter") filePath = path.join(__dirname, "../cookies_twitter.txt");
+    else if (platform === "facebook") filePath = path.join(__dirname, "../cookies_facebook.txt");
     else return res.status(400).json({ error: "Unsupported platform" });
 
     try {

@@ -9,15 +9,17 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
   const [youtubeCookies, setYoutubeCookies] = useState('');
   const [instagramCookies, setInstagramCookies] = useState('');
   const [twitterCookies, setTwitterCookies] = useState('');
+  const [facebookCookies, setFacebookCookies] = useState('');
   const [status, setStatus] = useState<{ type: 'idle' | 'loading' | 'success' | 'error'; message?: string }>({ type: 'idle' });
 
   if (!isOpen) return null;
 
-  const handleSave = async (platform: 'youtube' | 'instagram' | 'twitter') => {
+  const handleSave = async (platform: 'youtube' | 'instagram' | 'twitter' | 'facebook') => {
     let cookies = '';
     if (platform === 'youtube') cookies = youtubeCookies;
     else if (platform === 'instagram') cookies = instagramCookies;
     else if (platform === 'twitter') cookies = twitterCookies;
+    else if (platform === 'facebook') cookies = facebookCookies;
 
     if (!cookies.trim()) {
       setStatus({ type: 'error', message: 'Please paste cookies first' });
@@ -42,6 +44,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
       if (platform === 'youtube') setYoutubeCookies('');
       else if (platform === 'instagram') setInstagramCookies('');
       else if (platform === 'twitter') setTwitterCookies('');
+      else if (platform === 'facebook') setFacebookCookies('');
       
       setTimeout(() => setStatus({ type: 'idle' }), 3000);
     } catch (error: any) {
@@ -104,6 +107,25 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose }) => {
               className="w-full py-2.5 bg-slate-600 hover:bg-slate-700 text-white font-semibold rounded-lg shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
             >
               Update Instagram Cookies
+            </button>
+          </div>
+
+          <div className="space-y-3">
+            <label className="block text-sm font-bold text-slate-700 dark:text-slate-300 uppercase tracking-wider">
+              Facebook Cookies
+            </label>
+            <textarea
+              value={facebookCookies}
+              onChange={(e) => setFacebookCookies(e.target.value)}
+              placeholder="Paste your exported Facebook cookies here..."
+              className="w-full h-32 p-3 text-xs font-mono bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-lg focus:ring-2 focus:ring-purple-500 focus:border-transparent dark:text-slate-300 resize-none"
+            />
+            <button
+              onClick={() => handleSave('facebook')}
+              disabled={status.type === "loading"}
+              className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded-lg shadow-md transition-all active:scale-[0.98] disabled:opacity-50"
+            >
+              Update Facebook Cookies
             </button>
           </div>
 
