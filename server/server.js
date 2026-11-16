@@ -742,7 +742,7 @@ app.post("/api/transcribe", async (req, res) => {
         }
 
         res.write(JSON.stringify({ type: 'status', message: 'Processing with Gemini...' }) + '\n');
-        console.log("🤖 Sending to Gemini Flash 1.5...");
+        console.log("🤖 Sending to Gemini (gemini-2.5-flash)...");
 
         const audioBase64 = fs.readFileSync(tempAudioPath, { encoding: 'base64' });
 
@@ -776,7 +776,32 @@ app.post("/api/transcribe", async (req, res) => {
 
         const rawText = response.text;
         console.log("✅ Gemini response received");
-        
+
+        // Diagnostics: when Gemini returns an empty candidate, response.text
+        // is undefined and the old code misleadingly reported a JSON parse
+        // failure. Log WHY instead: finishReason / promptFeedback carry the
+        // real reason (SAFETY, PROHIBITED_CONTENT, RECITATION, blockReason).
+        const candidate = response.candidates?.[0];
+        const finishReason = candidate?.finishReason;
+        const safetyRatings = candidate?.safetyRatings;
+        console.log("ℹ️ Gemini finishReason:", finishReason || "(none)");
+        if (response.promptFeedback) {
+          console.log("ℹ️ Gemini promptFeedback:", JSON.stringify(response.promptFeedback));
+        }
+        if (response.usageMetadata) {
+          console.log("ℹ️ Gemini usageMetadata:", JSON.stringify(response.usageMetadata));
+        }
+
+        if (!rawText) {
+          const blockReason = response.promptFeedback?.blockReason;
+          const reason = blockReason
+            ? `Gemini blocked the request: ${blockReason} (finishReason: ${finishReason || "unknown"})`
+            : `Gemini returned no content (finishReason: ${finishReason || "unknown"})`;
+          console.error("❌ Gemini empty response:", reason, "| safetyRatings:", JSON.stringify(safetyRatings || []));
+          res.write(JSON.stringify({ type: 'error', data: { message: reason, details: `finishReason=${finishReason || "unknown"}; blockReason=${blockReason || "none"}` } }) + '\n');
+          return res.end();
+        }
+
         try {
           const resultData = JSON.parse(rawText);
           res.write(JSON.stringify({ type: 'result', data: resultData }) + '\n');
