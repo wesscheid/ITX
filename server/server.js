@@ -625,9 +625,30 @@ app.get("/api/download", async (req, res) => {
 
     const baseName = title ? title.toString() : "video";
     const filename = safeFileName(baseName, ".mp4");
-    
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
-    res.setHeader("Content-Type", "video/mp4");
+
+    // Download to a real file in the temp dir, never to stdout ("-o -").
+    // HLS sources (e.g. X Spaces) make yt-dlp's native downloader write
+    // fragment temp files next to the destination; with stdout as the
+    // destination those land in the process working directory, which is
+    // read-only on Vercel (Errno 30, "--FragN.part"). Merge/recode
+    // post-processing also requires a real file.
+    const downloadStamp = Date.now();
+    const downloadTemplate = path.join(os.tmpdir(), `download_${downloadStamp}.%(ext)s`);
+    const findDownloadedFile = () => {
+      try {
+        const name = fs.readdirSync(os.tmpdir()).find(n =>
+          n.startsWith(`download_${downloadStamp}.`) &&
+          !n.endsWith(".part") && !n.endsWith(".ytdl"));
+        return name ? path.join(os.tmpdir(), name) : null;
+      } catch { return null; }
+    };
+    const cleanupDownload = () => {
+      try {
+        fs.readdirSync(os.tmpdir())
+          .filter(n => n.startsWith(`download_${downloadStamp}`))
+          .forEach(n => { try { fs.unlinkSync(path.join(os.tmpdir(), n)); } catch {} });
+      } catch {}
+    };
 
     const cookiePath = await getCookiesPath(url);
     const args = [
@@ -642,7 +663,7 @@ app.get("/api/download", async (req, res) => {
       "--postprocessor-args",
       "ffmpeg:-c:v libx264 -c:a aac -movflags +faststart",
       "-o",
-      "-",
+      downloadTemplate,
       url
     ];
 
@@ -651,14 +672,30 @@ app.get("/api/download", async (req, res) => {
     }
 
     const child = spawn(YTDLP_PATH, args);
-    child.stdout.pipe(res);
-    
+    let stderrData = "";
+    child.stderr.on("data", (d) => { stderrData += d.toString(); });
+
     child.on("error", (e) => {
-      if (!res.headersSent) res.status(500).end();
+      cleanupDownload();
+      if (!res.headersSent) res.status(500).json({ error: e.message });
     });
-    
+
     child.on("close", (code) => {
-      if (!res.headersSent) res.end();
+      const downloadedPath = findDownloadedFile();
+      if (code !== 0 || !downloadedPath || fs.statSync(downloadedPath).size === 0) {
+        console.error("❌ Download failed. stderr:", stderrData);
+        cleanupDownload();
+        if (!res.headersSent) res.status(500).json({ error: "Download failed", details: stderrData });
+        return;
+      }
+      res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+      res.setHeader("Content-Type", "video/mp4");
+      res.setHeader("Content-Length", fs.statSync(downloadedPath).size);
+      const readStream = fs.createReadStream(downloadedPath);
+      readStream.on("error", () => { cleanupDownload(); if (!res.headersSent) res.status(500).end(); });
+      res.on("finish", cleanupDownload);
+      res.on("close", cleanupDownload);
+      readStream.pipe(res);
     });
   } catch (e) {
     if (!res.headersSent) res.status(500).json({ error: e.message });
@@ -697,11 +734,36 @@ app.post("/api/transcribe", async (req, res) => {
     const poToken = getPoToken("ios");
     if (poToken) extractorArgs += `;po_token=ios+${poToken}`;
 
+    // Download to a real file in the temp dir, never to stdout ("-o -").
+    // HLS sources (e.g. X Spaces) make yt-dlp's native downloader write
+    // fragment temp files next to the destination; with stdout as the
+    // destination those land in the process working directory, which is
+    // read-only on Vercel (Errno 30, "--FragN.part"), so every fragment
+    // fails and the result is an empty file.
+    const audioStamp = Date.now();
+    const tempAudioTemplate = path.join(os.tmpdir(), `audio_${audioStamp}.%(ext)s`);
+    let tempAudioPath = null;
+    const findDownloadedAudio = () => {
+      try {
+        const name = fs.readdirSync(os.tmpdir()).find(n =>
+          n.startsWith(`audio_${audioStamp}.`) &&
+          !n.endsWith(".part") && !n.endsWith(".ytdl"));
+        return name ? path.join(os.tmpdir(), name) : null;
+      } catch { return null; }
+    };
+    const cleanupAudio = () => {
+      try {
+        fs.readdirSync(os.tmpdir())
+          .filter(n => n.startsWith(`audio_${audioStamp}`))
+          .forEach(n => { try { fs.unlinkSync(path.join(os.tmpdir(), n)); } catch {} });
+      } catch {}
+    };
+
     const ytDlpArgs = [
       "-f", "ba[ext=m4a]/ba[ext=aac]/ba/bestaudio/best",
       "--no-playlist",
       "--extractor-args", extractorArgs,
-      "-o", "-",
+      "-o", tempAudioTemplate,
       url
     ];
 
@@ -709,10 +771,9 @@ app.post("/api/transcribe", async (req, res) => {
 
     const child = spawn(YTDLP_PATH, ytDlpArgs);
     let stderrData = "";
-    const tempAudioPath = path.join(os.tmpdir(), `audio_${Date.now()}.m4a`);
-    const writeStream = fs.createWriteStream(tempAudioPath);
     
     child.on("error", (err) => {
+      cleanupAudio();
       console.error("yt-dlp spawn error:", err);
       res.write(JSON.stringify({ type: 'error', data: { message: `Failed to start video downloader: ${err.message}` } }) + '\n');
       res.end();
@@ -726,17 +787,21 @@ app.post("/api/transcribe", async (req, res) => {
       });
     });
 
-    child.stdout.pipe(writeStream);
-
     child.on("close", async (code) => {
       try {
-        writeStream.end();
+        tempAudioPath = findDownloadedAudio();
+        if (!tempAudioPath) {
+          console.error("❌ Failed to fetch media bytes. stderr:", stderrData);
+          cleanupAudio();
+          res.write(JSON.stringify({ type: 'error', data: { error: "Failed to fetch media bytes", details: stderrData } }) + '\n');
+          return res.end();
+        }
         const stats = fs.statSync(tempAudioPath);
         console.log(`📦 Media bytes fetched: ${stats.size} bytes (Exit Code: ${code})`);
         
         if (stats.size === 0) {
           console.error("❌ Failed to fetch media bytes. stderr:", stderrData);
-          if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+          cleanupAudio();
           res.write(JSON.stringify({ type: 'error', data: { error: "Failed to fetch media bytes", details: stderrData } }) + '\n');
           return res.end();
         }
@@ -745,6 +810,8 @@ app.post("/api/transcribe", async (req, res) => {
         console.log("🤖 Sending to Gemini Flash 1.5...");
 
         const audioBase64 = fs.readFileSync(tempAudioPath, { encoding: 'base64' });
+        const audioMimeByExt = { ".m4a": "audio/mp4", ".mp4": "audio/mp4", ".aac": "audio/aac", ".mp3": "audio/mpeg", ".opus": "audio/ogg", ".webm": "audio/webm", ".wav": "audio/wav" };
+        const audioMimeType = audioMimeByExt[path.extname(tempAudioPath).toLowerCase()] || "audio/mp4";
 
         const response = await genAI.models.generateContent({
           model: "gemini-2.5-flash", 
@@ -752,7 +819,7 @@ app.post("/api/transcribe", async (req, res) => {
             {
               role: "user",
               parts: [
-                { inlineData: { data: audioBase64, mimeType: "audio/mp4" } },
+                { inlineData: { data: audioBase64, mimeType: audioMimeType } },
                 { text: prompt }
               ]
             }
@@ -772,7 +839,7 @@ app.post("/api/transcribe", async (req, res) => {
         });
         
         // Clean up temp file immediately after sending to Gemini
-        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+        cleanupAudio();
 
         const rawText = response.text;
         console.log("✅ Gemini response received");
@@ -787,7 +854,7 @@ app.post("/api/transcribe", async (req, res) => {
         res.end();
       } catch (geminiErr) {
         console.error("❌ Gemini Processing Error:", geminiErr);
-        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+        cleanupAudio();
         res.write(JSON.stringify({ type: 'error', data: { message: geminiErr.message || "Gemini processing failed" } }) + '\n');
         res.end();
       }
